@@ -13,7 +13,7 @@ pub fn build(b: *std.Build) void {
         .name = "drml",
         .root_module = module,
     });
-    
+
     b.installFile("package.json", "package.json");
     b.installArtifact(exe);
     b.installFile("README.md", "share/drml/README.md");
