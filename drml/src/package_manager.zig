@@ -319,6 +319,11 @@ fn writeLockfile(allocator: Allocator, manifest: *Manifest, packages: []LockedPa
 }
 
 fn fetchRegistryMetadata(allocator: Allocator, name: []const u8) ![]u8 {
+    if (comptime builtin.os.tag == .wasi) return error.UnsupportedInstallerTarget;
+    return fetchRegistryMetadataNative(allocator, name);
+}
+
+fn fetchRegistryMetadataNative(allocator: Allocator, name: []const u8) ![]u8 {
     const url = try std.fmt.allocPrint(allocator, "https://registry.npmjs.org/{s}", .{name});
     defer allocator.free(url);
     var client = std.http.Client{ .allocator = allocator };
@@ -449,6 +454,11 @@ fn resolvePackage(allocator: Allocator, package: *LockedPackage) !void {
 }
 
 fn downloadPackage(allocator: Allocator, package: *const LockedPackage) ![]u8 {
+    if (comptime builtin.os.tag == .wasi) return error.UnsupportedInstallerTarget;
+    return downloadPackageNative(allocator, package);
+}
+
+fn downloadPackageNative(allocator: Allocator, package: *const LockedPackage) ![]u8 {
     try std.fs.cwd().makePath(".drml-cache");
     const cache_key = std.hash.Wyhash.hash(0, package.name);
     const archive = try std.fmt.allocPrint(allocator, ".drml-cache/{x}-{s}.tgz", .{ cache_key, package.version });
@@ -471,6 +481,11 @@ fn downloadPackage(allocator: Allocator, package: *const LockedPackage) ![]u8 {
 }
 
 fn extractPackage(allocator: Allocator, package: *const LockedPackage, archive: []const u8) !void {
+    if (comptime builtin.os.tag == .wasi) return error.UnsupportedInstallerTarget;
+    return extractPackageNative(allocator, package, archive);
+}
+
+fn extractPackageNative(allocator: Allocator, package: *const LockedPackage, archive: []const u8) !void {
     const package_path = try std.fs.path.join(allocator, &.{ "node_modules", package.name });
     defer allocator.free(package_path);
     try std.fs.cwd().deleteTree(package_path);
@@ -618,6 +633,11 @@ fn packageJsonScript(allocator: Allocator, path: []const u8, script_name: []cons
 }
 
 fn runProcess(allocator: Allocator, argv: []const []const u8, cwd: ?[]const u8) !void {
+    if (comptime builtin.os.tag == .wasi) return error.UnsupportedInstallerTarget;
+    return runProcessNative(allocator, argv, cwd);
+}
+
+fn runProcessNative(allocator: Allocator, argv: []const []const u8, cwd: ?[]const u8) !void {
     const result = try std.process.Child.run(.{ .allocator = allocator, .argv = argv, .cwd = cwd, .max_output_bytes = 256 * 1024 });
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);

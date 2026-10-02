@@ -9,7 +9,6 @@
     <polygon points="35,-42 75,0 5,0" fill="#fde047"/>
     <polygon points="75,0 35,42 5,0" fill="#ea580c"/>
     <polygon points="35,42 -45,75 5,0" fill="#9a3412"/>
-    <circle cx="75" cy="0" r="7" fill="#ffffff"/>
   </g>
   <text x="340" y="235" fill="#ffffff" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="105" font-weight="900" letter-spacing="0.04em">DRML</text>
 </svg>
