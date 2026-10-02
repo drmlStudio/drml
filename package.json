@@ -1,5 +1,5 @@
 {
-  "name": "@drml/cli",
+  "name": "drml",
   "version": "0.1.0",
   "description": "An explicit package manager for JavaScript and TypeScript projects",
   "license": "MIT",

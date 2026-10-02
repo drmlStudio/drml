@@ -16,8 +16,6 @@ pub fn build(b: *std.Build) void {
 
     b.installFile("package.json", "package.json");
     b.installArtifact(exe);
-    b.installFile("README.md", "share/drml/README.md");
-    b.installFile("LICENSE", "share/drml/LICENSE");
     b.installFile("README.md", "README.md");
     b.installFile("LICENSE", "LICENSE");
 
