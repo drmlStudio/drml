@@ -4,3 +4,5 @@ dist/
 *.lock.tmp
 node_modules/
 .drml-cache/
+website/docs/.vitepress/cache/
+website/docs/.vitepress/dist/
