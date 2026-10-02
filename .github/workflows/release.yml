@@ -11,49 +11,9 @@ env:
   ZIG_VERSION: 0.15.2
 
 jobs:
-  package:
-    name: Package ${{ matrix.package }}
+  release:
+    name: Build WASM & Publish
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-linux-gnu
-            package: linux-x64
-            archive: linux-x86_64
-            os: linux
-            cpu: x64
-            executable: drml
-          - target: aarch64-linux-gnu
-            package: linux-arm64
-            archive: linux-aarch64
-            os: linux
-            cpu: arm64
-            executable: drml
-          - target: x86_64-macos-none
-            package: darwin-x64
-            archive: macos-x86_64
-            os: darwin
-            cpu: x64
-            executable: drml
-          - target: aarch64-macos-none
-            package: darwin-arm64
-            archive: macos-aarch64
-            os: darwin
-            cpu: arm64
-            executable: drml
-          - target: x86_64-windows-gnu
-            package: win32-x64
-            archive: windows-x86_64
-            os: win32
-            cpu: x64
-            executable: drml.exe
-          - target: wasm32-wasi
-            package: wasm32-wasi
-            archive: wasm32-wasi
-            os: ''
-            cpu: ''
-            executable: drml.wasm
 
     steps:
       - name: Check out repository
@@ -67,86 +27,52 @@ jobs:
           tar -xJf /tmp/zig.tar.xz -C /tmp
           echo "/tmp/zig-x86_64-linux-${ZIG_VERSION}" >> "$GITHUB_PATH"
 
-      - name: Build binary
+      - name: Build WASM
         shell: bash
-        env:
-          DRML_TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          zig build -Dtarget="$DRML_TARGET" -Doptimize=ReleaseSafe
+          zig build -Dtarget=wasm32-wasi -Doptimize=ReleaseSafe
 
-      - name: Create release archive
-        shell: bash
-        env:
-          DRML_VERSION: ${{ github.event.release.tag_name }}
-          DRML_ARCHIVE: ${{ matrix.archive }}
-          DRML_EXECUTABLE: ${{ matrix.executable }}
-        run: |
-          set -euo pipefail
-          version="${DRML_VERSION#v}"
-          binary="zig-out/bin/drml"
-          if [[ "$DRML_EXECUTABLE" == "drml.exe" ]]; then
-            binary="zig-out/bin/drml.exe"
-          elif [[ "$DRML_EXECUTABLE" == "drml.wasm" ]]; then
-            binary="zig-out/bin/drml.wasm"
-          fi
-          test -f "$binary"
-          rm -rf dist
-          mkdir -p "dist/drml-${version}-${DRML_ARCHIVE}"
-          cp "$binary" "dist/drml-${version}-${DRML_ARCHIVE}/${DRML_EXECUTABLE}"
-          cp README.md LICENSE "dist/drml-${version}-${DRML_ARCHIVE}/"
-          (cd dist && zip -q -r "drml-${version}-${DRML_ARCHIVE}.zip" "drml-${version}-${DRML_ARCHIVE}")
-
-      - name: Create scoped npm package
-        shell: bash
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          PACKAGE_NAME: ${{ matrix.package }}
-          PACKAGE_OS: ${{ matrix.os }}
-          PACKAGE_CPU: ${{ matrix.cpu }}
-          PACKAGE_EXECUTABLE: ${{ matrix.executable }}
-        run: |
-          set -euo pipefail
-          version="${RELEASE_TAG#v}"
-          package_dir="npm-package"
-          rm -rf "$package_dir"
-          mkdir -p "$package_dir/bin"
-          cp "zig-out/bin/drml${PACKAGE_EXECUTABLE#drml}" "$package_dir/bin/$PACKAGE_EXECUTABLE"
-          cp LICENSE "$package_dir/"
-          cat > "$package_dir/package.json" <<JSON
-          {
-            "name": "@drml/${PACKAGE_NAME}",
-            "version": "${version}",
-            "description": "drml native binary for ${PACKAGE_NAME}",
-            "license": "MIT",
-            "repository": "https://github.com/drmlStudio/drml",
-            "bin": {
-              "drml": "bin/${PACKAGE_EXECUTABLE}"
-            },
-            "files": ["bin", "LICENSE"]$(if [[ -n "$PACKAGE_OS" ]]; then printf ',\n            "os": ["%s"],\n            "cpu": ["%s"]' "$PACKAGE_OS" "$PACKAGE_CPU"; fi)
-          }
-          JSON
-          if [[ "$PACKAGE_EXECUTABLE" != "drml.exe" ]]; then
-            chmod +x "$package_dir/bin/$PACKAGE_EXECUTABLE"
-          fi
-          npm pack "$package_dir" --pack-destination dist
-
-      - name: Upload GitHub Release assets
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event.release.tag_name }}
-          files: |
-            dist/*.zip
-            dist/*.tgz
-
-      - name: Publish scoped npm package
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
-      - name: Publish @drml package
+      - name: Package & Publish npm Packages
         shell: bash
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish dist/drml-${{ matrix.package }}-*.tgz --access public
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          mkdir -p dist
+
+          # Copy repo documentation/licenses directly into zig-out
+          cp README.md LICENSE zig-out/
+
+          for pkg in "drml" "@drml/cli"; do
+            # Overwrite package.json inside zig-out for the current target name
+            cat > zig-out/package.json <<EOF
+          {
+            "name": "${pkg}",
+            "version": "${version}",
+            "description": "drml WebAssembly CLI",
+            "license": "MIT",
+            "repository": "https://github.com/drmlStudio/drml"
+          }
+          EOF
+
+            # Pack and publish whatever is inside zig-out
+            npm pack ./zig-out --pack-destination dist
+            npm publish ./zig-out --access public
+          done
+
+      - name: Upload GitHub Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: |
+            zig-out/bin/drml.wasm
+            dist/*.tgz

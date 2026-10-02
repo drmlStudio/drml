@@ -18,7 +18,7 @@
     "zig"
   ],
   "bin": {
-    "drml": "bin/drml"
+    "drml": "bin/drml.wasm"
   },
   "files": [
     "bin",
