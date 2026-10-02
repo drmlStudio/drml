@@ -1,4 +1,4 @@
-(./assets/logo-drml.svg)
+![Logo](./assets/logo-drml.svg)
 
 [![CI](https://github.com/drmlStudio/drml/actions/workflows/ci.yml/badge.svg)](https://github.com/drmlStudio/drml/actions/workflows/ci.yml)
 
