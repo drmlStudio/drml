@@ -43,9 +43,15 @@ pub const PackageManager = struct {
             try appendPeerPackages(self.allocator, &packages, &package_indexes, &workspace, false, true);
             if (options.include_optional_peers) try appendPeerPackages(self.allocator, &packages, &package_indexes, &workspace, true, true);
         }
+        if (options.lockfile_only) {
+            for (packages.items) |*package| {
+                if (!package.git and !isExactVersion(package.version)) try resolvePackage(self.allocator, package);
+            }
+        }
         if (!options.lockfile_only) {
             if (comptime builtin.os.tag == .wasi) return error.UnsupportedInstallerTarget;
             try installPackages(self.allocator, packages.items, options.run_scripts);
+            try linkWorkspacePackages(self.allocator, manifest.workspace_paths.items);
         }
         try writeLockfile(self.allocator, &manifest, packages.items);
         return packages.items.len;
@@ -74,6 +80,7 @@ const LockedPackage = struct {
     dev: bool,
     optional: bool,
     peer: bool,
+    git: bool = false,
 };
 
 fn jsonString(value: std.json.Value) ?[]const u8 {
@@ -205,13 +212,18 @@ fn isExactVersion(spec: []const u8) bool {
 
 fn validateSpec(name: []const u8, spec: []const u8) !void {
     if (std.mem.startsWith(u8, spec, "workspace:")) return error.UnsupportedWorkspaceProtocol;
-    if (std.mem.indexOf(u8, spec, "://") != null or std.mem.startsWith(u8, spec, "git")) {
-        return error.UnsupportedDependencyProtocol;
-    }
-    if (!isExactVersion(spec)) {
-        std.debug.print("drml: {s}@{s}: only exact x.y.z versions are supported in this milestone\n", .{ name, spec });
+    if (isGitSpec(spec)) return;
+    if (std.mem.indexOf(u8, spec, "://") != null) return error.UnsupportedDependencyProtocol;
+    if (spec.len == 0) {
+        std.debug.print("drml: {s}: empty dependency specification\n", .{name});
         return error.UnsupportedVersionRange;
     }
+}
+
+fn isGitSpec(spec: []const u8) bool {
+    return std.mem.startsWith(u8, spec, "git+") or
+        std.mem.startsWith(u8, spec, "git://") or
+        std.mem.startsWith(u8, spec, "github:");
 }
 
 fn appendPackages(allocator: Allocator, list: *std.ArrayList(LockedPackage), indexes: *std.StringHashMap(usize), map: *std.StringHashMap([]const u8), dev: bool, optional: bool, peer: bool, allow_workspace_protocol: bool) !void {
@@ -230,14 +242,19 @@ fn appendPackages(allocator: Allocator, list: *std.ArrayList(LockedPackage), ind
             existing.peer = existing.peer or peer;
             continue;
         }
+        const git = isGitSpec(entry.value_ptr.*);
         try list.append(allocator, .{
             .name = try allocator.dupe(u8, entry.key_ptr.*),
             .requested = entry.value_ptr.*,
             .version = entry.value_ptr.*,
-            .source = try std.fmt.allocPrint(allocator, "https://registry.npmjs.org/{s}/-/{s}-{s}.tgz", .{ entry.key_ptr.*, packageBasename(entry.key_ptr.*), entry.value_ptr.* }),
+            .source = if (git)
+                try allocator.dupe(u8, entry.value_ptr.*)
+            else
+                try std.fmt.allocPrint(allocator, "https://registry.npmjs.org/{s}/-/{s}-{s}.tgz", .{ entry.key_ptr.*, packageBasename(entry.key_ptr.*), entry.value_ptr.* }),
             .dev = dev,
             .optional = optional,
             .peer = peer,
+            .git = git,
         });
         try indexes.put(try allocator.dupe(u8, entry.key_ptr.*), list.items.len - 1);
     }
@@ -316,6 +333,86 @@ fn fetchRegistryMetadata(allocator: Allocator, name: []const u8) ![]u8 {
     return try allocator.dupe(u8, body.writer.buffer[0..body.writer.end]);
 }
 
+const Version = struct { major: u64, minor: u64, patch: u64 };
+
+fn parseVersion(value: []const u8) ?Version {
+    var parts = std.mem.splitScalar(u8, value, '.');
+    const major = std.fmt.parseInt(u64, parts.next() orelse return null, 10) catch return null;
+    const minor = std.fmt.parseInt(u64, parts.next() orelse return null, 10) catch return null;
+    const patch_part = parts.next() orelse return null;
+    if (std.mem.indexOfScalar(u8, patch_part, '-') != null) return null;
+    const patch = std.fmt.parseInt(u64, patch_part, 10) catch return null;
+    if (parts.next() != null) return null;
+    return .{ .major = major, .minor = minor, .patch = patch };
+}
+
+fn compareVersion(left: Version, right: Version) std.math.Order {
+    if (left.major != right.major) return std.math.order(left.major, right.major);
+    if (left.minor != right.minor) return std.math.order(left.minor, right.minor);
+    return std.math.order(left.patch, right.patch);
+}
+
+fn satisfiesRange(version: Version, requested: []const u8) bool {
+    const spec = std.mem.trim(u8, requested, " \t");
+    if (std.mem.eql(u8, spec, "*") or std.mem.eql(u8, spec, "latest")) return true;
+    if (std.mem.startsWith(u8, spec, "^")) {
+        const base = parseVersion(spec[1..]) orelse return false;
+        if (compareVersion(version, base) == .lt) return false;
+        if (base.major > 0) return version.major == base.major;
+        if (base.minor > 0) return version.major == 0 and version.minor == base.minor;
+        return version.major == 0 and version.minor == 0 and version.patch == base.patch;
+    }
+    if (std.mem.startsWith(u8, spec, "~")) {
+        const base = parseVersion(spec[1..]) orelse return false;
+        return compareVersion(version, base) != .lt and version.major == base.major and version.minor == base.minor;
+    }
+    if (std.mem.startsWith(u8, spec, ">=")) {
+        const base = parseVersion(spec[2..]) orelse return false;
+        return compareVersion(version, base) != .lt;
+    }
+    if (std.mem.startsWith(u8, spec, ">")) {
+        const base = parseVersion(spec[1..]) orelse return false;
+        return compareVersion(version, base) == .gt;
+    }
+    if (std.mem.startsWith(u8, spec, "<=")) {
+        const base = parseVersion(spec[2..]) orelse return false;
+        return compareVersion(version, base) != .gt;
+    }
+    if (std.mem.startsWith(u8, spec, "<")) {
+        const base = parseVersion(spec[1..]) orelse return false;
+        return compareVersion(version, base) == .lt;
+    }
+    if (std.mem.indexOf(u8, spec, "||")) |separator| {
+        return satisfiesRange(version, spec[0..separator]) or satisfiesRange(version, spec[separator + 2 ..]);
+    }
+    if (std.mem.endsWith(u8, spec, ".x") or std.mem.endsWith(u8, spec, ".*")) {
+        const prefix = spec[0 .. spec.len - 2];
+        var parts = std.mem.splitScalar(u8, prefix, '.');
+        const major = std.fmt.parseInt(u64, parts.next() orelse return false, 10) catch return false;
+        if (parts.next()) |minor_text| {
+            const minor = std.fmt.parseInt(u64, minor_text, 10) catch return false;
+            return version.major == major and version.minor == minor;
+        }
+        return version.major == major;
+    }
+    return if (parseVersion(spec)) |exact| compareVersion(version, exact) == .eq else false;
+}
+
+fn selectVersion(allocator: Allocator, versions: std.json.ObjectMap, requested: []const u8) ![]const u8 {
+    var selected: ?[]const u8 = null;
+    var selected_version: ?Version = null;
+    var it = versions.iterator();
+    while (it.next()) |entry| {
+        const version = parseVersion(entry.key_ptr.*) orelse continue;
+        if (!satisfiesRange(version, requested)) continue;
+        if (selected_version == null or compareVersion(version, selected_version.?) == .gt) {
+            selected = entry.key_ptr.*;
+            selected_version = version;
+        }
+    }
+    return try allocator.dupe(u8, selected orelse return error.UnsupportedVersionRange);
+}
+
 fn resolvePackage(allocator: Allocator, package: *LockedPackage) !void {
     const metadata_source = try fetchRegistryMetadata(allocator, package.name);
     defer allocator.free(metadata_source);
@@ -330,6 +427,10 @@ fn resolvePackage(allocator: Allocator, package: *LockedPackage) !void {
         .object => |object| object,
         else => return error.InvalidRegistryMetadata,
     };
+    if (!isExactVersion(package.version)) {
+        const selected = try selectVersion(allocator, versions, package.requested);
+        package.version = selected;
+    }
     const version_value = versions.get(package.version) orelse return error.PackageVersionNotFound;
     const version_object = switch (version_value) {
         .object => |object| object,
@@ -427,12 +528,71 @@ fn linkOneBinary(allocator: Allocator, package: *const LockedPackage, name: []co
 fn installPackages(allocator: Allocator, packages: []LockedPackage, run_scripts: bool) !void {
     for (packages) |*package| {
         std.debug.print("drml: resolving {s}@{s}\n", .{ package.name, package.version });
+        if (package.git) {
+            try installGitPackage(allocator, package);
+            if (run_scripts) try runPackageLifecycle(allocator, package);
+            continue;
+        }
         try resolvePackage(allocator, package);
         const archive = try downloadPackage(allocator, package);
         defer allocator.free(archive);
         try extractPackage(allocator, package, archive);
         if (run_scripts) try runPackageLifecycle(allocator, package);
         std.debug.print("drml: installed {s}@{s}\n", .{ package.name, package.version });
+    }
+}
+
+fn installGitPackage(allocator: Allocator, package: *const LockedPackage) !void {
+    try std.fs.cwd().makePath(".drml-cache");
+    const cache_path = try std.fmt.allocPrint(allocator, ".drml-cache/git-{x}", .{std.hash.Wyhash.hash(0, package.source)});
+    defer allocator.free(cache_path);
+    try std.fs.cwd().deleteTree(cache_path);
+    var allocated_source: ?[]const u8 = null;
+    const source = if (std.mem.startsWith(u8, package.source, "git+")) package.source[4..] else if (std.mem.startsWith(u8, package.source, "github:")) blk: {
+        allocated_source = try std.fmt.allocPrint(allocator, "https://github.com/{s}.git", .{package.source[7..]});
+        break :blk allocated_source.?;
+    } else package.source;
+    defer if (allocated_source) |value| allocator.free(value);
+    const clone_argv = [_][]const u8{ "git", "clone", "--depth", "1", source, cache_path };
+    try runProcess(allocator, &clone_argv, null);
+    const package_path = try std.fs.path.join(allocator, &.{ "node_modules", package.name });
+    defer allocator.free(package_path);
+    try std.fs.cwd().deleteTree(package_path);
+    try std.fs.cwd().makePath(package_path);
+    const copy_argv = [_][]const u8{ "cp", "-R", "-T", cache_path, package_path };
+    try runProcess(allocator, &copy_argv, null);
+    try linkPackageBinaries(allocator, package);
+    std.debug.print("drml: installed {s} from {s}\n", .{ package.name, package.source });
+}
+
+fn packageNameAt(allocator: Allocator, manifest_path: []const u8) !?[]const u8 {
+    const file = try std.fs.cwd().openFile(manifest_path, .{});
+    defer file.close();
+    const source = try file.readToEndAlloc(allocator, 2 * 1024 * 1024);
+    defer allocator.free(source);
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, source, .{});
+    defer parsed.deinit();
+    const root = switch (parsed.value) {
+        .object => |object| object,
+        else => return error.InvalidManifest,
+    };
+    const name = root.get("name") orelse return null;
+    const value = jsonString(name) orelse return error.InvalidManifest;
+    return try allocator.dupe(u8, value);
+}
+
+fn linkWorkspacePackages(allocator: Allocator, manifests: []const []const u8) !void {
+    try std.fs.cwd().makePath("node_modules");
+    for (manifests) |manifest_path| {
+        const name = (try packageNameAt(allocator, manifest_path)) orelse continue;
+        defer allocator.free(name);
+        const workspace_dir = std.fs.path.dirname(manifest_path) orelse continue;
+        const target = try std.fs.cwd().realpathAlloc(allocator, workspace_dir);
+        defer allocator.free(target);
+        const link_path = try std.fs.path.join(allocator, &.{ "node_modules", name });
+        defer allocator.free(link_path);
+        std.fs.cwd().deleteFile(link_path) catch {};
+        try std.fs.cwd().symLink(target, link_path, .{});
     }
 }
 
@@ -457,9 +617,8 @@ fn packageJsonScript(allocator: Allocator, path: []const u8, script_name: []cons
     return try allocator.dupe(u8, value);
 }
 
-fn runCommand(allocator: Allocator, command: []const u8, cwd: ?[]const u8) !void {
-    const argv = [_][]const u8{ "sh", "-c", command };
-    const result = try std.process.Child.run(.{ .allocator = allocator, .argv = &argv, .cwd = cwd, .max_output_bytes = 256 * 1024 });
+fn runProcess(allocator: Allocator, argv: []const []const u8, cwd: ?[]const u8) !void {
+    const result = try std.process.Child.run(.{ .allocator = allocator, .argv = argv, .cwd = cwd, .max_output_bytes = 256 * 1024 });
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
     if (result.stdout.len != 0) std.debug.print("{s}", .{result.stdout});
@@ -470,10 +629,23 @@ fn runCommand(allocator: Allocator, command: []const u8, cwd: ?[]const u8) !void
     }
 }
 
-pub fn runScript(allocator: Allocator, script_name: []const u8) !void {
+fn runCommand(allocator: Allocator, command: []const u8, cwd: ?[]const u8) !void {
+    const argv = [_][]const u8{ "sh", "-c", command };
+    try runProcess(allocator, &argv, cwd);
+}
+
+pub fn runScript(allocator: Allocator, script_name: []const u8, args: []const []const u8) !void {
     const command = (try packageJsonScript(allocator, "package.json", script_name)) orelse return error.ScriptNotFound;
     defer allocator.free(command);
-    try runCommand(allocator, command, null);
+    var argv = std.ArrayList([]const u8){};
+    defer argv.deinit(allocator);
+    try argv.appendSlice(allocator, &.{ "sh", "-c", command, "drml-run" });
+    try argv.appendSlice(allocator, args);
+    try runProcess(allocator, argv.items, null);
+}
+
+pub fn execCommand(allocator: Allocator, argv: []const []const u8) !void {
+    try runProcess(allocator, argv, null);
 }
 
 fn runPackageLifecycle(allocator: Allocator, package: *const LockedPackage) !void {

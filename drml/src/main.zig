@@ -7,6 +7,8 @@ fn printUsage() void {
         "Usage:\n" ++
         "  drml init [directory]  Create a minimal package.json\n" ++
         "  drml build             Run the package.json build script\n" ++
+        "  drml run <script>      Run a package.json script\n" ++
+        "  drml exec <command>    Run a command directly\n" ++
         "  drml install           Read package.json and write drml-lock.json\n" ++
         "  drml install --lockfile-only  Only generate drml-lock.json\n" ++
         "  drml install --include-optional-peers  Install optional peer dependencies\n" ++
@@ -44,14 +46,31 @@ pub fn main() !void {
     }
 
     if (std.mem.eql(u8, args[1], "build")) {
-        if (args.len > 2) return error.InvalidArguments;
-        try package_manager.runScript(allocator, "build");
+        try package_manager.runScript(allocator, "build", if (args.len > 2) args[2..] else &.{});
+        return;
+    }
+
+    if (std.mem.eql(u8, args[1], "run")) {
+        if (args.len < 3) return error.InvalidArguments;
+        try package_manager.runScript(allocator, args[2], if (args.len > 3) args[3..] else &.{});
+        return;
+    }
+
+    if (std.mem.eql(u8, args[1], "exec")) {
+        if (args.len < 3) return error.InvalidArguments;
+        try package_manager.execCommand(allocator, args[2..]);
         return;
     }
 
     if (!std.mem.eql(u8, args[1], "install")) {
-        printUsage();
-        return error.UnknownCommand;
+        package_manager.runScript(allocator, args[1], if (args.len > 2) args[2..] else &.{}) catch |err| switch (err) {
+            error.ScriptNotFound => {
+                printUsage();
+                return error.UnknownCommand;
+            },
+            else => return err,
+        };
+        return;
     }
 
     var manager = package_manager.PackageManager.init(allocator);

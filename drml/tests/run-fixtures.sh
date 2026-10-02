@@ -76,6 +76,57 @@ run_build_success() {
   echo "BUILD PASS: $name"
 }
 
+run_script_success() {
+  local name="$1"
+  local dir="$TMP/$name-script"
+  mkdir -p "$dir"
+  cp -R "$FIXTURES/$name/." "$dir/"
+  if ! (cd "$dir" && "$BIN" run test run-ok >stdout 2>stderr); then
+    echo "FAIL (run expected success): $name"
+    cat "$dir/stderr"
+    exit 1
+  fi
+  test "$(cat "$dir/test-output.txt")" = "run-ok"
+  if ! (cd "$dir" && "$BIN" test implicit-ok >stdout 2>stderr); then
+    echo "FAIL (implicit script expected success): $name"
+    cat "$dir/stderr"
+    exit 1
+  fi
+  test "$(cat "$dir/test-output.txt")" = "implicit-ok"
+  pass_count=$((pass_count + 1))
+  echo "RUN PASS: $name"
+}
+
+run_exec_success() {
+  local name="$1"
+  local dir="$TMP/$name-exec"
+  mkdir -p "$dir"
+  cp -R "$FIXTURES/$name/." "$dir/"
+  if ! (cd "$dir" && "$BIN" exec printf exec-ok >stdout 2>exec-output.txt); then
+    echo "FAIL (exec expected success): $name"
+    cat "$dir/exec-output.txt"
+    exit 1
+  fi
+  test "$(cat "$dir/exec-output.txt")" = "exec-ok"
+  pass_count=$((pass_count + 1))
+  echo "EXEC PASS: $name"
+}
+
+run_workspace_link_success() {
+  local name="$1"
+  local dir="$TMP/$name-link"
+  mkdir -p "$dir"
+  cp -R "$FIXTURES/$name/." "$dir/"
+  if ! (cd "$dir" && "$BIN" install >stdout 2>stderr); then
+    echo "FAIL (workspace link expected success): $name"
+    cat "$dir/stderr"
+    exit 1
+  fi
+  test -L "$dir/node_modules/local-pkg"
+  pass_count=$((pass_count + 1))
+  echo "WORKSPACE LINK PASS: $name"
+}
+
 run_success minimal-exact
 run_success all-dependency-types --include-optional-peers
 run_success package-manager-npm
@@ -84,6 +135,12 @@ run_success package-manager-yarn
 run_success package-manager-bun
 run_success scoped-package
 run_build_success build-script
+run_script_success build-script
+run_exec_success build-script
+run_success range-version
+run_success workspace-protocol
+run_workspace_link_success workspace-protocol
+run_success git-dependency
 run_success omit-dev --omit-dev
 run_success optional-peer
 cp "$TMP/optional-peer/drml-lock.json" "$TMP/optional-peer-default-lock.json"
@@ -103,6 +160,13 @@ assert optional_peer["packages"] == {"react": {
 assert workspace_dev["packages"]["typescript"]["dev"] is True
 PY
 
+python3 - <<'PY' "$TMP/range-version/drml-lock.json" "$TMP/git-dependency/drml-lock.json"
+import json, sys
+range_lock, git_lock = [json.load(open(path)) for path in sys.argv[1:]]
+assert range_lock["packages"]["left-pad"]["version"] == "1.3.0"
+assert git_lock["packages"]["demo"]["source"] == "git+https://github.com/example/demo.git"
+PY
+
 python3 - <<'PY' "$TMP/all-dependency-types/drml-lock.json"
 import json, sys
 lock = json.load(open(sys.argv[1]))
@@ -114,9 +178,6 @@ assert lock["packages"]["react"]["peer"] is True
 PY
 
 auto_failures=(
-  "range-version|only exact x.y.z versions"
-  "workspace-protocol|UnsupportedWorkspaceProtocol"
-  "git-dependency|UnsupportedDependencyProtocol"
   "invalid-dependencies-type|InvalidDependencySpec"
   "invalid-peer-meta|InvalidDependencySpec"
   "invalid-package-manager|InvalidPackageManager"
@@ -227,7 +288,7 @@ run_audit_check_success() {
 
 run_audit_install_failure non-object-array InvalidManifest
 run_audit_install_failure non-object-null InvalidManifest
-run_audit_install_failure leading-zero only\ exact\ x.y.z
+run_audit_install_failure leading-zero UnsupportedVersionRange
 run_audit_install_failure duplicate-conflict ConflictingDependencySpec
 
 for command in "install unexpected-argument" "check unexpected-argument" "init one two"; do

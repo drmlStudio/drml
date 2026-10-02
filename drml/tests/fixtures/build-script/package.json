@@ -2,6 +2,7 @@
   "name": "build-script-fixture",
   "version": "0.1.0",
   "scripts": {
-    "build": "printf build-ok > build-output.txt"
+    "build": "printf build-ok > build-output.txt",
+    "test": "printf \"$1\" > test-output.txt"
   }
 }
