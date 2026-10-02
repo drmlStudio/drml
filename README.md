@@ -1,8 +1,14 @@
 ![Logo](./assets/logo-drml-black.svg)
 
-[![CI](https://github.com/drmlStudio/drml/actions/workflows/ci.yml/badge.svg)](https://github.com/drmlStudio/drml/actions/workflows/ci.yml)
+# drml
 
-`drml` is an explicit package manager for JavaScript and TypeScript projects, built in Zig. It starts with a deliberately small promise: validate what a manifest says, record what happened, and fail clearly when compatibility is not implemented yet.
+[![CI](https://img.shields.io/github/actions/workflow/status/drmlStudio/drml/ci.yml?branch=main&label=CI)](https://github.com/drmlStudio/drml/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/drmlStudio/drml?display_name=tag)](https://github.com/drmlStudio/drml/releases)
+[![License](https://img.shields.io/github/license/drmlStudio/drml)](LICENSE)
+[![Built with Zig](https://img.shields.io/badge/built%20with-Zig-F7A41D?logo=zig&logoColor=white)](https://ziglang.org/)
+[![Docs](https://img.shields.io/badge/docs-VitePress-646CFF?logo=vitepress&logoColor=white)](https://github.com/drmlStudio/drml/tree/main/website)
+
+`drml` is an explicit package manager for JavaScript and TypeScript projects, built in Zig. It validates what a manifest says, records what happened, and fails clearly when compatibility is not implemented yet.
 
 > **Status:** early development. The current milestone supports direct dependencies at exact versions and a source import checker. Expect the CLI and lockfile format to evolve.
 
@@ -18,43 +24,84 @@
 
 - **A wider direction:** the architecture leaves room for a resolver, store, linker, checker, compiler, test runner, and dev server.
 
-## Quick start
+## Install and build
 
-Build with [Zig 0.15.2](https://ziglang.org/download/):
+Build from source with [Zig 0.15.2](https://ziglang.org/download/):
 
 ```
 git clone https://github.com/drmlStudio/drml.git
 cd drml
 zig build
+```
+
+The default build creates a ready-to-pack directory at `zig-out/`:
+
+```
+zig-out/
+├── bin/drml       # executable
+├── package.json   # npm package manifest; bin.drml points to bin/drml
+├── README.md
+└── LICENSE
+```
+
+You can inspect or pack it with npm without publishing anything:
+
+```
+npm pack ./zig-out
+```
+
+For a local CLI run:
+
+```
 zig build run -- --help
 ```
 
-Create or inspect a project manifest:
+## CLI reference
+
+### Synopsis
 
 ```
-zig build run -- init
-zig build run -- install
-zig build run -- check
+drml [command] [options]
 ```
 
-Use lockfile-only mode to validate a manifest and generate `drml-lock.json` without downloading packages:
+The CLI operates on the current working directory unless `init` is given an explicit directory. It reads `package.json`, writes `drml-lock.json`, and reports failures on stderr.
 
+### Global flags
+
+| Flag | Alias | Description |
+| --- | --- | --- |
+| `--help` | `-h` | Print the command summary and strict compatibility notes. It is also shown when no command is provided. |
+
+There is currently **no ****`--version`**** flag**. Use the release tag or package metadata to identify a build.
+
+### Commands
+
+| Command | Options / arguments | Description |
+| --- | --- | --- |
+| `drml init` | `[directory]` | Create a minimal `package.json` in the current directory or in the optional directory. Accepts at most one directory. |
+| `drml install` | none | Read `package.json`, validate exact versions, resolve registry metadata, write `drml-lock.json`, download direct packages, and extract them into `node_modules`. |
+| `drml install` | `--lockfile-only` | Validate the manifest and generate `drml-lock.json` without downloading or extracting packages. This is useful for offline validation and CI fixture tests. |
+| `drml check` | none | Scan JavaScript and TypeScript files for undeclared ESM imports, re-exports, CommonJS `require` calls, and literal dynamic `import( )` calls. Relative imports and Node built-ins are ignored. |
+
+All other flags and positional arguments are rejected with `InvalidArguments`. Unknown commands are rejected with `UnknownCommand`.
+
+### Manifest fields
+
+The installer understands `dependencies`, `devDependencies`, `optionalDependencies`, `peerDependencies`, and `peerDependenciesMeta`. It caches downloaded archives in `.drml-cache/` and records development, optional, and peer flags in the lockfile.
+
+Example:
+
+```json
+{
+  "name": "my-app",
+  "version": "0.1.0",
+  "dependencies": {
+    "typescript": "5.7.2"
+  }
+}
 ```
-zig build run -- install --lockfile-only
-```
 
-## Current commands
-
-| Command | What it does |
-| --- | --- |
-| `drml init [directory]` | Create a minimal `package.json`. |
-| `drml install` | Validate exact versions, resolve registry metadata, write the lockfile, and install direct packages. |
-| `drml install --lockfile-only` | Generate a lockfile without network installation. |
-| `drml check` | Find undeclared ESM, CommonJS, and literal dynamic-import packages. |
-
-The installer understands `dependencies`, `devDependencies`, `optionalDependencies`, `peerDependencies`, and `peerDependenciesMeta`. It caches downloaded archives in `.drml-cache/` and records development and optional/peer flags in the lockfile.
-
-## Deliberate boundaries
+### Deliberate boundaries
 
 The current milestone refuses to silently guess for:
 
@@ -78,38 +125,44 @@ Run the unit tests, native build, WASI build, and fixture matrix:
 zig build test
 zig build -Doptimize=ReleaseSafe
 zig build -Dtarget=wasm32-wasi -Doptimize=ReleaseSafe
-./tests/run-fixtures.sh
+./drml/tests/run-fixtures.sh
 ```
 
-The fixture corpus covers ordinary manifests, invalid shapes, exact-version failures, foreign lockfiles, workspaces, package-manager metadata, source checking, and regression cases. Registry-backed fixtures are opt-in:
+The fixture corpus covers ordinary manifests, invalid shapes, exact-version failures, foreign lockfiles, workspaces, source checking, and regression cases. Registry-backed fixtures are opt-in:
 
 ```
-DRML_LIVE_TESTS=1 ./tests/run-fixtures.sh
-./tests/run-live-install.sh
+DRML_LIVE_TESTS=1 ./drml/tests/run-fixtures.sh
+./drml/tests/run-live-install.sh
 ```
 
-## Releases
-
-Publishing a GitHub Release triggers `.github/workflows/release.yml`, which packages Linux x86_64/aarch64, macOS x86_64/aarch64, Windows x86_64, and WASI `wasm32-wasi` archives.
+Keep Zig formatting clean:
 
 ```
-DRML_VERSION=0.1.0 DRML_ARCHIVE=linux-x86_64 ./scripts/package-release.sh
+zig fmt --check build.zig drml/src
 ```
 
 ## Documentation site
 
-The `website/` directory contains a plain-local Vue + VitePress site with a dark gradient visual system based on the drml logo:
+The `website/` directory combines VitePress with Vue single-file components. VitePress supplies the static documentation shell and Vite-powered dev server; Vue components are registered through the VitePress theme and can be used directly in Markdown.
 
 ```
 cd website
 npm install
-npm run dev
+npm run dev       # local VitePress dev server
+npm run build     # static site in docs/.vitepress/dist/
+npm run typecheck
 ```
+
+The site is intentionally plain-local and can be deployed to any static host. See the [website guide](website/README.md).
+
+## Releases
+
+Publishing a GitHub Release triggers `.github/workflows/release.yml`, which packages Linux x86_64/aarch64, macOS x86_64/aarch64, Windows x86_64, and WASI `wasm32-wasi` archives, as well as platform-specific npm packages.
 
 ## Contributing
 
-Small, focused changes are welcome. Include a fixture for behavior changes, keep `zig fmt --check build.zig src` clean, and explain intentional compatibility boundaries in the README or docs.
+Small, focused changes are welcome. Include a fixture for behavior changes, keep `zig fmt --check build.zig drml/src` clean, and explain intentional compatibility boundaries in the README or docs.
 
 ## License
 
-MIT © 2026 drml contributors. See [`LICENSE`](LICENSE).
+[MIT](LICENSE)

@@ -1,0 +1,31 @@
+{
+  "name": "@drml/cli",
+  "version": "0.1.0",
+  "description": "An explicit package manager for JavaScript and TypeScript projects",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/drmlStudio/drml.git"
+  },
+  "homepage": "https://github.com/drmlStudio/drml",
+  "bugs": {
+    "url": "https://github.com/drmlStudio/drml/issues"
+  },
+  "keywords": [
+    "package-manager",
+    "javascript",
+    "typescript",
+    "zig"
+  ],
+  "bin": {
+    "drml": "bin/drml"
+  },
+  "files": [
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

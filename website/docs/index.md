@@ -30,33 +30,10 @@ features:
 
 `drml` is an early, compatible slice of a new package-tooling stack. Today it installs direct dependencies at exact versions and audits imports. Tomorrow it can become the full development loop for JS and TS projects.
 
-<div class="home-grid">
-
-<div class="home-card">
-
-### Install only what you mean
-
-```sh
-zig build run -- install
-```
-
-Exact-version manifests are validated instead of guessed around. The generated `drml-lock.json` records what happened.
-
-</div>
-
-<div class="home-card">
-
-### Catch drift before runtime
-
-```sh
-drml check
-```
-
-Scan ESM imports, CommonJS `require`, and literal dynamic imports for packages missing from `package.json`.
-
-</div>
-
-</div>
+<CapabilityGrid :items="[
+  { title: 'Install only what you mean', description: 'Exact-version manifests are validated instead of guessed around. The generated drml-lock.json records what happened.', command: 'zig build run -- install' },
+  { title: 'Catch drift before runtime', description: 'Scan ESM imports, CommonJS require, and literal dynamic imports for packages missing from package.json.', command: 'drml check' }
+]" />
 
 ## Current surface
 

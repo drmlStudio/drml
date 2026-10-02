@@ -13,9 +13,16 @@ pub fn build(b: *std.Build) void {
         .name = "drml",
         .root_module = module,
     });
+    
+    b.installFile("package.json", "package.json");
     b.installArtifact(exe);
     b.installFile("README.md", "share/drml/README.md");
     b.installFile("LICENSE", "share/drml/LICENSE");
+    b.installFile("README.md", "README.md");
+    b.installFile("LICENSE", "LICENSE");
+
+    const package_step = b.step("package", "Build a distributable npm package in zig-out");
+    package_step.dependOn(b.getInstallStep());
 
     const run_cmd = b.addRunArtifact(exe);
     if (b.args) |args| run_cmd.addArgs(args);
