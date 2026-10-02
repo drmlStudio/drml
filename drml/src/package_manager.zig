@@ -3,6 +3,13 @@ const builtin = @import("builtin");
 
 const Allocator = std.mem.Allocator;
 
+pub const InstallOptions = struct {
+    lockfile_only: bool = false,
+    run_scripts: bool = false,
+    include_dev: bool = true,
+    include_optional_peers: bool = false,
+};
+
 pub const PackageManager = struct {
     allocator: Allocator,
 
@@ -11,30 +18,34 @@ pub const PackageManager = struct {
     }
 
     pub fn install(self: *PackageManager) !usize {
-        return self.installWithOptions(false);
+        return self.installWithOptions(.{});
     }
 
-    pub fn installWithOptions(self: *PackageManager, lockfile_only: bool) !usize {
+    pub fn installWithOptions(self: *PackageManager, options: InstallOptions) !usize {
         if (findForeignLockfile()) |lockfile| {
             std.debug.print("drml: found {s}; import support is not enabled yet, refusing to ignore it\n", .{lockfile});
             return error.ForeignLockfilePresent;
         }
 
         var manifest = try readManifest(self.allocator, "package.json");
-        if (manifest.has_workspaces) {
-            std.debug.print("drml: workspaces detected; recursive monorepo resolution is not enabled yet\n", .{});
-            return error.UnsupportedWorkspaces;
-        }
-
         var packages = std.ArrayList(LockedPackage){};
         var package_indexes = std.StringHashMap(usize).init(self.allocator);
-        try appendPackages(self.allocator, &packages, &package_indexes, &manifest.dependencies, false, false, false);
-        try appendPackages(self.allocator, &packages, &package_indexes, &manifest.dev_dependencies, true, false, false);
-        try appendPackages(self.allocator, &packages, &package_indexes, &manifest.optional_dependencies, false, true, false);
-        try appendPackages(self.allocator, &packages, &package_indexes, &manifest.peer_dependencies, false, false, true);
-        if (!lockfile_only) {
+        try appendPackages(self.allocator, &packages, &package_indexes, &manifest.dependencies, false, false, false, manifest.has_workspaces);
+        if (options.include_dev) try appendPackages(self.allocator, &packages, &package_indexes, &manifest.dev_dependencies, true, false, false, manifest.has_workspaces);
+        try appendPackages(self.allocator, &packages, &package_indexes, &manifest.optional_dependencies, false, true, false, manifest.has_workspaces);
+        try appendPeerPackages(self.allocator, &packages, &package_indexes, &manifest, false, manifest.has_workspaces);
+        if (options.include_optional_peers) try appendPeerPackages(self.allocator, &packages, &package_indexes, &manifest, true, manifest.has_workspaces);
+        for (manifest.workspace_paths.items) |workspace_manifest_path| {
+            var workspace = try readManifest(self.allocator, workspace_manifest_path);
+            try appendPackages(self.allocator, &packages, &package_indexes, &workspace.dependencies, false, false, false, true);
+            if (options.include_dev) try appendPackages(self.allocator, &packages, &package_indexes, &workspace.dev_dependencies, true, false, false, true);
+            try appendPackages(self.allocator, &packages, &package_indexes, &workspace.optional_dependencies, false, true, false, true);
+            try appendPeerPackages(self.allocator, &packages, &package_indexes, &workspace, false, true);
+            if (options.include_optional_peers) try appendPeerPackages(self.allocator, &packages, &package_indexes, &workspace, true, true);
+        }
+        if (!options.lockfile_only) {
             if (comptime builtin.os.tag == .wasi) return error.UnsupportedInstallerTarget;
-            try installPackages(self.allocator, packages.items);
+            try installPackages(self.allocator, packages.items, options.run_scripts);
         }
         try writeLockfile(self.allocator, &manifest, packages.items);
         return packages.items.len;
@@ -51,6 +62,7 @@ const Manifest = struct {
     optional_peers: std.StringHashMap(bool),
     package_manager: ?[]const u8 = null,
     has_workspaces: bool = false,
+    workspace_paths: std.ArrayList([]const u8),
 };
 
 const LockedPackage = struct {
@@ -87,6 +99,26 @@ fn readObjectMap(allocator: Allocator, root: ?std.json.Value) !std.StringHashMap
     return result;
 }
 
+fn collectWorkspacePaths(allocator: Allocator, paths: *std.ArrayList([]const u8), pattern: []const u8) !void {
+    const wildcard = std.mem.indexOfAny(u8, pattern, "*") orelse {
+        const manifest_path = try std.fmt.allocPrint(allocator, "{s}/package.json", .{pattern});
+        if (std.fs.cwd().access(manifest_path, .{})) |_| try paths.append(allocator, manifest_path) else |_| allocator.free(manifest_path);
+        return;
+    };
+    const slash = std.mem.lastIndexOfScalar(u8, pattern[0..wildcard], '/') orelse 0;
+    const base = if (slash == 0) "." else pattern[0..slash];
+    var dir = std.fs.cwd().openDir(base, .{ .iterate = true }) catch return;
+    defer dir.close();
+    var iterator = dir.iterate();
+    while (try iterator.next()) |entry| {
+        if (entry.kind != .directory) continue;
+        const child = if (slash == 0) entry.name else try std.fmt.allocPrint(allocator, "{s}/{s}", .{ base, entry.name });
+        defer if (slash != 0) allocator.free(child);
+        const manifest_path = try std.fmt.allocPrint(allocator, "{s}/package.json", .{child});
+        if (std.fs.cwd().access(manifest_path, .{})) |_| try paths.append(allocator, manifest_path) else |_| allocator.free(manifest_path);
+    }
+}
+
 fn readManifest(allocator: Allocator, path: []const u8) !Manifest {
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
@@ -105,6 +137,7 @@ fn readManifest(allocator: Allocator, path: []const u8) !Manifest {
         .optional_dependencies = try readObjectMap(allocator, root.get("optionalDependencies")),
         .peer_dependencies = try readObjectMap(allocator, root.get("peerDependencies")),
         .optional_peers = std.StringHashMap(bool).init(allocator),
+        .workspace_paths = std.ArrayList([]const u8){},
     };
     if (root.get("name")) |value| {
         if (jsonString(value)) |name| manifest.name = try allocator.dupe(u8, name);
@@ -119,7 +152,25 @@ fn readManifest(allocator: Allocator, path: []const u8) !Manifest {
     }
     if (root.get("workspaces")) |value| {
         switch (value) {
-            .array, .object => manifest.has_workspaces = true,
+            .array => |items| {
+                manifest.has_workspaces = true;
+                for (items.items) |item| {
+                    const pattern = jsonString(item) orelse return error.InvalidWorkspaces;
+                    try collectWorkspacePaths(allocator, &manifest.workspace_paths, pattern);
+                }
+            },
+            .object => |object| {
+                manifest.has_workspaces = true;
+                const packages = object.get("packages") orelse return error.InvalidWorkspaces;
+                const items = switch (packages) {
+                    .array => |array| array,
+                    else => return error.InvalidWorkspaces,
+                };
+                for (items.items) |item| {
+                    const pattern = jsonString(item) orelse return error.InvalidWorkspaces;
+                    try collectWorkspacePaths(allocator, &manifest.workspace_paths, pattern);
+                }
+            },
             else => return error.InvalidWorkspaces,
         }
     }
@@ -163,9 +214,13 @@ fn validateSpec(name: []const u8, spec: []const u8) !void {
     }
 }
 
-fn appendPackages(allocator: Allocator, list: *std.ArrayList(LockedPackage), indexes: *std.StringHashMap(usize), map: *std.StringHashMap([]const u8), dev: bool, optional: bool, peer: bool) !void {
+fn appendPackages(allocator: Allocator, list: *std.ArrayList(LockedPackage), indexes: *std.StringHashMap(usize), map: *std.StringHashMap([]const u8), dev: bool, optional: bool, peer: bool, allow_workspace_protocol: bool) !void {
     var it = map.iterator();
     while (it.next()) |entry| {
+        if (std.mem.startsWith(u8, entry.value_ptr.*, "workspace:")) {
+            if (!allow_workspace_protocol) return error.UnsupportedWorkspaceProtocol;
+            continue;
+        }
         try validateSpec(entry.key_ptr.*, entry.value_ptr.*);
         if (indexes.get(entry.key_ptr.*)) |existing_index| {
             const existing = &list.items[existing_index];
@@ -190,6 +245,18 @@ fn appendPackages(allocator: Allocator, list: *std.ArrayList(LockedPackage), ind
 
 fn packageBasename(name: []const u8) []const u8 {
     return if (std.mem.lastIndexOfScalar(u8, name, '/')) |slash| name[slash + 1 ..] else name;
+}
+
+fn appendPeerPackages(allocator: Allocator, list: *std.ArrayList(LockedPackage), indexes: *std.StringHashMap(usize), manifest: *Manifest, optional_only: bool, allow_workspace_protocol: bool) !void {
+    var it = manifest.peer_dependencies.iterator();
+    while (it.next()) |entry| {
+        const is_optional = manifest.optional_peers.contains(entry.key_ptr.*);
+        if (is_optional != optional_only) continue;
+        var one = std.StringHashMap([]const u8).init(allocator);
+        defer one.deinit();
+        try one.put(entry.key_ptr.*, entry.value_ptr.*);
+        try appendPackages(allocator, list, indexes, &one, false, false, true, allow_workspace_protocol);
+    }
 }
 
 fn writeLockfile(allocator: Allocator, manifest: *Manifest, packages: []LockedPackage) !void {
@@ -357,14 +424,69 @@ fn linkOneBinary(allocator: Allocator, package: *const LockedPackage, name: []co
     try std.fs.cwd().symLink(target_path, link_path, .{});
 }
 
-fn installPackages(allocator: Allocator, packages: []LockedPackage) !void {
+fn installPackages(allocator: Allocator, packages: []LockedPackage, run_scripts: bool) !void {
     for (packages) |*package| {
         std.debug.print("drml: resolving {s}@{s}\n", .{ package.name, package.version });
         try resolvePackage(allocator, package);
         const archive = try downloadPackage(allocator, package);
         defer allocator.free(archive);
         try extractPackage(allocator, package, archive);
+        if (run_scripts) try runPackageLifecycle(allocator, package);
         std.debug.print("drml: installed {s}@{s}\n", .{ package.name, package.version });
+    }
+}
+
+fn packageJsonScript(allocator: Allocator, path: []const u8, script_name: []const u8) !?[]const u8 {
+    const file = std.fs.cwd().openFile(path, .{}) catch |err| return err;
+    defer file.close();
+    const source = try file.readToEndAlloc(allocator, 2 * 1024 * 1024);
+    defer allocator.free(source);
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, source, .{});
+    defer parsed.deinit();
+    const root = switch (parsed.value) {
+        .object => |object| object,
+        else => return error.InvalidManifest,
+    };
+    const scripts = root.get("scripts") orelse return null;
+    const object = switch (scripts) {
+        .object => |value| value,
+        else => return error.InvalidScripts,
+    };
+    const command = object.get(script_name) orelse return null;
+    const value = jsonString(command) orelse return error.InvalidScripts;
+    return try allocator.dupe(u8, value);
+}
+
+fn runCommand(allocator: Allocator, command: []const u8, cwd: ?[]const u8) !void {
+    const argv = [_][]const u8{ "sh", "-c", command };
+    const result = try std.process.Child.run(.{ .allocator = allocator, .argv = &argv, .cwd = cwd, .max_output_bytes = 256 * 1024 });
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    if (result.stdout.len != 0) std.debug.print("{s}", .{result.stdout});
+    if (result.stderr.len != 0) std.debug.print("{s}", .{result.stderr});
+    switch (result.term) {
+        .Exited => |code| if (code != 0) return error.ScriptFailed,
+        else => return error.ScriptFailed,
+    }
+}
+
+pub fn runScript(allocator: Allocator, script_name: []const u8) !void {
+    const command = (try packageJsonScript(allocator, "package.json", script_name)) orelse return error.ScriptNotFound;
+    defer allocator.free(command);
+    try runCommand(allocator, command, null);
+}
+
+fn runPackageLifecycle(allocator: Allocator, package: *const LockedPackage) !void {
+    const package_path = try std.fs.path.join(allocator, &.{ "node_modules", package.name });
+    defer allocator.free(package_path);
+    const manifest_path = try std.fs.path.join(allocator, &.{ package_path, "package.json" });
+    defer allocator.free(manifest_path);
+    const lifecycle = [_][]const u8{ "preinstall", "install", "postinstall" };
+    for (lifecycle) |name| {
+        const command = (try packageJsonScript(allocator, manifest_path, name)) orelse continue;
+        defer allocator.free(command);
+        std.debug.print("drml: running {s} for {s}\n", .{ name, package.name });
+        try runCommand(allocator, command, package_path);
     }
 }
 

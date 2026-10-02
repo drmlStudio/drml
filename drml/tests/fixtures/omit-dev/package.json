@@ -1,0 +1,7 @@
+{
+  "name": "omit-dev-fixture",
+  "version": "0.1.0",
+  "devDependencies": {
+    "typescript": "5.7.2"
+  }
+}

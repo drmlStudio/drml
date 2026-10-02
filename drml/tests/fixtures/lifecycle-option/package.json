@@ -1,0 +1,9 @@
+{
+  "name": "lifecycle-option-fixture",
+  "version": "0.1.0",
+  "scripts": {
+    "preinstall": "printf preinstall",
+    "install": "printf install",
+    "postinstall": "printf postinstall"
+  }
+}

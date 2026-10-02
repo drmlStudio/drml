@@ -6,13 +6,16 @@ fn printUsage() void {
     std.debug.print("drml - a Zig package manager\n\n" ++
         "Usage:\n" ++
         "  drml init [directory]  Create a minimal package.json\n" ++
+        "  drml build             Run the package.json build script\n" ++
         "  drml install           Read package.json and write drml-lock.json\n" ++
         "  drml install --lockfile-only  Only generate drml-lock.json\n" ++
+        "  drml install --include-optional-peers  Install optional peer dependencies\n" ++
+        "  drml install --omit-dev  Skip root/workspace devDependencies\n" ++
+        "  drml install --run-scripts  Run dependency lifecycle scripts (default: ignore)\n" ++
         "  drml check             Find imports missing from package.json\n" ++
         "  drml --help            Show this help\n\n" ++
-        "The first milestone is intentionally strict: exact versions and the\n" ++
-        "standard dependency fields are accepted; unsupported protocols/ranges\n" ++
-        "fail instead of silently producing a misleading lockfile.\n", .{});
+        "Exact versions are required. Lifecycle scripts are ignored unless\n" ++
+        "--run-scripts is explicitly supplied.\n", .{});
 }
 
 pub fn main() !void {
@@ -40,14 +43,23 @@ pub fn main() !void {
         return;
     }
 
+    if (std.mem.eql(u8, args[1], "build")) {
+        if (args.len > 2) return error.InvalidArguments;
+        try package_manager.runScript(allocator, "build");
+        return;
+    }
+
     if (!std.mem.eql(u8, args[1], "install")) {
         printUsage();
         return error.UnknownCommand;
     }
 
-    if (args.len > 3 or (args.len == 3 and !std.mem.eql(u8, args[2], "--lockfile-only"))) return error.InvalidArguments;
-
     var manager = package_manager.PackageManager.init(allocator);
-    const count = try manager.installWithOptions(args.len == 3);
+    var options = package_manager.InstallOptions{};
+    var index: usize = 2;
+    while (index < args.len) : (index += 1) {
+        if (std.mem.eql(u8, args[index], "--lockfile-only")) options.lockfile_only = true else if (std.mem.eql(u8, args[index], "--run-scripts")) options.run_scripts = true else if (std.mem.eql(u8, args[index], "--include-dev")) options.include_dev = true else if (std.mem.eql(u8, args[index], "--omit-dev")) options.include_dev = false else if (std.mem.eql(u8, args[index], "--include-optional-peers")) options.include_optional_peers = true else return error.InvalidArguments;
+    }
+    const count = try manager.installWithOptions(options);
     std.debug.print("wrote drml-lock.json with {d} direct entries\n", .{count});
 }

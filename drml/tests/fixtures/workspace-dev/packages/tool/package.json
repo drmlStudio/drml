@@ -1,0 +1,7 @@
+{
+  "name": "workspace-tool",
+  "version": "0.1.0",
+  "devDependencies": {
+    "typescript": "5.7.2"
+  }
+}

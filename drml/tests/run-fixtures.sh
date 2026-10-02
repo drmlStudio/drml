@@ -13,10 +13,11 @@ xfail_count=0
 
 run_success() {
   local name="$1"
+  shift
   local dir="$TMP/$name"
   mkdir -p "$dir"
   cp -R "$FIXTURES/$name/." "$dir/"
-  if ! (cd "$dir" && "$BIN" install --lockfile-only >stdout 2>stderr); then
+  if ! (cd "$dir" && "$BIN" install --lockfile-only "$@" >stdout 2>stderr); then
     echo "FAIL (expected success): $name"
     cat "$dir/stderr"
     exit 1
@@ -60,13 +61,47 @@ run_registry_failure() {
   echo "REGISTRY EXPECTED FAILURE: $name"
 }
 
+run_build_success() {
+  local name="$1"
+  local dir="$TMP/$name"
+  mkdir -p "$dir"
+  cp -R "$FIXTURES/$name/." "$dir/"
+  if ! (cd "$dir" && "$BIN" build >stdout 2>stderr); then
+    echo "FAIL (build expected success): $name"
+    cat "$dir/stderr"
+    exit 1
+  fi
+  test "$(cat "$dir/build-output.txt")" = "build-ok"
+  pass_count=$((pass_count + 1))
+  echo "BUILD PASS: $name"
+}
+
 run_success minimal-exact
-run_success all-dependency-types
+run_success all-dependency-types --include-optional-peers
 run_success package-manager-npm
 run_success package-manager-pnpm
 run_success package-manager-yarn
 run_success package-manager-bun
 run_success scoped-package
+run_build_success build-script
+run_success omit-dev --omit-dev
+run_success optional-peer
+cp "$TMP/optional-peer/drml-lock.json" "$TMP/optional-peer-default-lock.json"
+run_success optional-peer --include-optional-peers
+run_success workspace-dev
+run_success lifecycle-option --run-scripts
+
+python3 - <<'PY' "$TMP/omit-dev/drml-lock.json" "$TMP/optional-peer-default-lock.json" "$TMP/optional-peer/drml-lock.json" "$TMP/workspace-dev/drml-lock.json"
+import json, sys
+omit_dev, optional_peer_default, optional_peer, workspace_dev = [json.load(open(path)) for path in sys.argv[1:]]
+assert omit_dev["packages"] == {}
+assert optional_peer_default["packages"] == {}
+assert optional_peer["packages"] == {"react": {
+    "requested": "18.3.1", "version": "18.3.1",
+    "source": "https://registry.npmjs.org/react/-/react-18.3.1.tgz",
+    "integrity": None, "dev": False, "optional": False, "peer": True}}
+assert workspace_dev["packages"]["typescript"]["dev"] is True
+PY
 
 python3 - <<'PY' "$TMP/all-dependency-types/drml-lock.json"
 import json, sys
@@ -85,8 +120,6 @@ auto_failures=(
   "invalid-dependencies-type|InvalidDependencySpec"
   "invalid-peer-meta|InvalidDependencySpec"
   "invalid-package-manager|InvalidPackageManager"
-  "monorepo-root|workspaces detected"
-  "nested-package|workspaces detected"
   "foreign-package-lock-json|found package-lock.json"
   "foreign-npm-shrinkwrap-json|found npm-shrinkwrap.json"
   "foreign-pnpm-lock-yaml|found pnpm-lock.yaml"
@@ -98,6 +131,9 @@ for item in "${auto_failures[@]}"; do
   IFS='|' read -r name needle <<< "$item"
   run_failure "$name" "$needle"
 done
+
+run_success monorepo-root
+run_success nested-package
 
 if [[ "${DRML_LIVE_TESTS:-0}" == "1" ]]; then
   run_registry_failure nonexistent-package PackageNotFound
