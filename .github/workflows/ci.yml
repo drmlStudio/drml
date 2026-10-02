@@ -29,7 +29,7 @@ jobs:
           echo "/tmp/zig-x86_64-linux-${ZIG_VERSION}" >> "$GITHUB_PATH"
 
       - name: Format check
-        run: zig fmt --check build.zig src
+        run: zig fmt --check build.zig drml/src
 
       - name: Unit tests
         run: zig build test

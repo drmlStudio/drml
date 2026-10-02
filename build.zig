@@ -14,6 +14,8 @@ pub fn build(b: *std.Build) void {
         .root_module = module,
     });
     b.installArtifact(exe);
+    b.installFile("README.md", "share/drml/README.md");
+    b.installFile("LICENSE", "share/drml/LICENSE");
 
     const run_cmd = b.addRunArtifact(exe);
     if (b.args) |args| run_cmd.addArgs(args);
