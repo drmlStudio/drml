@@ -1,0 +1,1 @@
+{"name":"git-dependency","version":"0.1.0","dependencies":{"demo":"git+https://github.com/example/demo.git"}}

@@ -1,0 +1,1 @@
+{"name":"nonexistent-package","version":"0.1.0","dependencies":{"this-package-should-not-exist-drml-fixture":"1.0.0"}}

@@ -1,0 +1,10 @@
+import React from "react";
+import "@scope/pkg/subpath";
+import { describe } from "vitest";
+import fs from "node:fs";
+import path from "path";
+import local from "./local";
+export { thing } from "@scope/pkg/other";
+const lazy = import("react/jsx-runtime");
+// import "commented-out-package";
+const text = "require('string-package')";
