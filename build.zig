@@ -40,6 +40,11 @@ pub fn build(b: *std.Build) void {
     const tests = b.addTest(.{
         .root_module = module,
     });
+    if (target.result.os.tag == .macos) {
+        // Keep the test link explicit as well; Zig does not always propagate
+        // system libraries from a shared root module into addTest artifacts.
+        tests.linkSystemLibrary("System");
+    }
     const test_step = b.step("test", "Run drml tests");
     test_step.dependOn(&b.addRunArtifact(tests).step);
 }
