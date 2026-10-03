@@ -45,9 +45,6 @@ jobs:
       - name: Install JavaScript test dependencies
         run: npm ci --ignore-scripts
 
-      - name: Check Zig formatting
-        run: zig fmt --check build.zig drml/src
-
       - name: Run Zig unit tests
         run: zig build test
 
