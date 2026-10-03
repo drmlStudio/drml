@@ -49,7 +49,7 @@ jobs:
       - name: Run Zig unit tests on macOS
         if: runner.os == 'macOS'
         shell: bash
-        run: npm run test:zig
+        run: zig test ./drml/src/main.zig -lc
 
       - name: Run Zig unit tests on non-macOS
         if: runner.os != 'macOS'
