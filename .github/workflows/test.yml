@@ -16,6 +16,7 @@ jobs:
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+
     strategy:
       fail-fast: false
       matrix:
@@ -49,13 +50,16 @@ jobs:
       - name: Install JavaScript test dependencies
         run: npm ci --ignore-scripts
 
-      - name: Run Zig unit tests
+      - name: Run Zig unit tests on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: npm run test:zig -- --sysroot "$(xcrun --show-sdk-path)"
+
+      - name: Run Zig unit tests on non-macOS
+        if: runner.os != 'macOS'
         run: |
-          if [ "${{ runner.os }}" = "macOS" ]; then
-            npm run test:zig -- --sysroot "$(xcrun --show-sdk-path)"
-          else
-            npm run test:zig
-          fi
+          npm run test:zig
+
       - name: Build release executable
         run: zig build -Doptimize=ReleaseSafe
 

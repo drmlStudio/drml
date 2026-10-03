@@ -11,6 +11,11 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
 
+    if (target.result.os.tag == .macos) {
+        // Module.linkSystemLibrary takes a library name and options.
+        module.linkSystemLibrary("System", .{});
+    }
+
     const exe = b.addExecutable(.{
         .name = "drml",
         .root_module = module,
@@ -36,6 +41,12 @@ pub fn build(b: *std.Build) void {
     const tests = b.addTest(.{
         .root_module = module,
     });
+
+    if (target.result.os.tag == .macos) {
+        // Compile.linkSystemLibrary takes only the library name.
+        tests.linkSystemLibrary("System");
+    }
+
     tests.linkLibC();
 
     const test_step = b.step("test", "Run drml tests");
