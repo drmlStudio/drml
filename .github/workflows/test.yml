@@ -50,8 +50,12 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Run Zig unit tests
-        run: npm run test:zig
-
+        run: |
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            npm run test:zig -- --sysroot "$(xcrun --show-sdk-path)"
+          else
+            npm run test:zig
+          fi
       - name: Build release executable
         run: zig build -Doptimize=ReleaseSafe
 
