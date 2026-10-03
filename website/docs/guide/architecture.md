@@ -9,7 +9,7 @@ src/
 └── package_checker.zig   # source scanning and undeclared-import diagnostics
 ```
 
-The package manager owns manifest parsing, dependency-field merging, exact-version validation, registry metadata, tarball extraction, cache handling, and lockfile writing. The checker walks source trees while skipping dependencies, build output, and coverage directories.
+The package manager owns manifest parsing, dependency-field merging, semver range selection, registry metadata, tarball extraction, cache handling, and lockfile writing. The checker walks source trees while skipping dependencies, build output, and coverage directories.
 
 ## Roadmap
 

@@ -20,18 +20,18 @@ features:
     details: A native Zig binary with no third-party Zig packages and a direct path from command to result.
   - icon: ◈
     title: Explicit by default
-    details: Exact versions, visible lockfiles, integrity metadata, and clear refusal of unsupported protocols.
+    details: Semver ranges, visible lockfiles, integrity metadata, and clear diagnostics for unsupported protocols.
   - icon: ◎
     title: Built to grow
     details: A focused foundation for resolution, workspaces, stores, checkers, compilers, and dev tooling.
 ---
 
-## The sharp edge is the feature
+## A small, inspectable package manager
 
-`drml` is an early, compatible slice of a new package-tooling stack. Today it installs direct dependencies at exact versions and audits imports. Tomorrow it can become the full development loop for JS and TS projects.
+`drml` is an early, compatible slice of a new package-tooling stack. Today it installs direct dependencies, writes its own lockfile, and audits imports. The CLI and lockfile format will continue to grow.
 
 <CapabilityGrid :items="[
-  { title: 'Install only what you mean', description: 'Exact-version manifests are validated instead of guessed around. The generated drml-lock.json records what happened.', command: 'zig build run -- install' },
+  { title: 'Inspect every install', description: 'The generated drml-lock.json records resolved versions, sources, and integrity metadata.', command: 'zig build run -- install' },
   { title: 'Catch drift before runtime', description: 'Scan ESM imports, CommonJS require, and literal dynamic imports for packages missing from package.json.', command: 'drml check' }
 ]" />
 
@@ -42,4 +42,4 @@ features:
 - `init` — create a minimal manifest
 - WASI build target for host-adapted WebAssembly experiments
 
-> drml refuses to silently guess. Unsupported ranges, protocols, foreign lockfiles, and workspace roots are surfaced as explicit errors while compatibility work lands.
+> drml writes its own lockfile without importing or deleting npm-family lockfiles. Unsupported protocols and incomplete compatibility areas are surfaced as explicit errors.

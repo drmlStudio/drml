@@ -22,11 +22,6 @@ pub const PackageManager = struct {
     }
 
     pub fn installWithOptions(self: *PackageManager, options: InstallOptions) !usize {
-        if (findForeignLockfile()) |lockfile| {
-            std.debug.print("drml: found {s}; import support is not enabled yet, refusing to ignore it\n", .{lockfile});
-            return error.ForeignLockfilePresent;
-        }
-
         var manifest = try readManifest(self.allocator, "package.json");
         var packages = std.ArrayList(LockedPackage){};
         var package_indexes = std.StringHashMap(usize).init(self.allocator);
@@ -236,7 +231,11 @@ fn appendPackages(allocator: Allocator, list: *std.ArrayList(LockedPackage), ind
         try validateSpec(entry.key_ptr.*, entry.value_ptr.*);
         if (indexes.get(entry.key_ptr.*)) |existing_index| {
             const existing = &list.items[existing_index];
-            if (!std.mem.eql(u8, existing.requested, entry.value_ptr.*)) return error.ConflictingDependencySpec;
+            // A package can be listed in several manifest sections. Keep the
+            // first request (root dependencies take precedence over dev,
+            // optional, and peer entries) and merge the section markers. This
+            // matches npm's one-package installation model and avoids
+            // rejecting harmless repeats such as ^22.15.3 and 22.15.3.
             existing.dev = existing.dev and dev;
             existing.optional = existing.optional or optional;
             existing.peer = existing.peer or peer;
@@ -357,18 +356,18 @@ fn compareVersion(left: Version, right: Version) std.math.Order {
     return std.math.order(left.patch, right.patch);
 }
 
-fn satisfiesRange(version: Version, requested: []const u8) bool {
-    const spec = std.mem.trim(u8, requested, " \t");
-    if (std.mem.eql(u8, spec, "*") or std.mem.eql(u8, spec, "latest")) return true;
+fn satisfiesComparator(version: Version, comparator: []const u8) bool {
+    const spec = std.mem.trim(u8, comparator, " \t");
+    if (spec.len == 0 or std.mem.eql(u8, spec, "*") or std.mem.eql(u8, spec, "x") or std.mem.eql(u8, spec, "X")) return true;
     if (std.mem.startsWith(u8, spec, "^")) {
-        const base = parseVersion(spec[1..]) orelse return false;
+        const base = parseVersion(std.mem.trim(u8, spec[1..], " \t")) orelse return false;
         if (compareVersion(version, base) == .lt) return false;
         if (base.major > 0) return version.major == base.major;
         if (base.minor > 0) return version.major == 0 and version.minor == base.minor;
         return version.major == 0 and version.minor == 0 and version.patch == base.patch;
     }
     if (std.mem.startsWith(u8, spec, "~")) {
-        const base = parseVersion(spec[1..]) orelse return false;
+        const base = parseVersion(std.mem.trim(u8, spec[1..], " \t")) orelse return false;
         return compareVersion(version, base) != .lt and version.major == base.major and version.minor == base.minor;
     }
     if (std.mem.startsWith(u8, spec, ">=")) {
@@ -401,6 +400,24 @@ fn satisfiesRange(version: Version, requested: []const u8) bool {
         return version.major == major;
     }
     return if (parseVersion(spec)) |exact| compareVersion(version, exact) == .eq else false;
+}
+
+fn satisfiesRange(version: Version, requested: []const u8) bool {
+    const spec = std.mem.trim(u8, requested, " \t");
+    if (std.mem.eql(u8, spec, "latest")) return true;
+    var alternatives = std.mem.splitSequence(u8, spec, "||");
+    while (alternatives.next()) |alternative| {
+        var comparators = std.mem.tokenizeAny(u8, alternative, " \t");
+        var matches = true;
+        while (comparators.next()) |comparator| {
+            if (!satisfiesComparator(version, comparator)) {
+                matches = false;
+                break;
+            }
+        }
+        if (matches) return true;
+    }
+    return false;
 }
 
 fn selectVersion(allocator: Allocator, versions: std.json.ObjectMap, requested: []const u8) ![]const u8 {
@@ -682,14 +699,6 @@ fn runPackageLifecycle(allocator: Allocator, package: *const LockedPackage) !voi
     }
 }
 
-fn findForeignLockfile() ?[]const u8 {
-    const candidates = [_][]const u8{ "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb" };
-    for (candidates) |candidate| {
-        if (std.fs.cwd().access(candidate, .{})) |_| return candidate else |_| {}
-    }
-    return null;
-}
-
 pub fn initProject(path: []const u8) !void {
     try std.fs.cwd().makePath(path);
     const full = try std.fs.path.join(std.heap.page_allocator, &.{ path, "package.json" });
@@ -704,4 +713,11 @@ test "exact versions are accepted" {
     try validateSpec("demo", "1.2.3");
     try std.testing.expect(isExactVersion("1.2.3"));
     try std.testing.expect(!isExactVersion("^1.2.3"));
+}
+
+test "common semver ranges are accepted" {
+    try std.testing.expect(satisfiesRange(.{ .major = 22, .minor = 16, .patch = 0 }, "^22.15.3"));
+    try std.testing.expect(satisfiesRange(.{ .major = 1, .minor = 3, .patch = 7 }, ">=1.0.0 <2.0.0"));
+    try std.testing.expect(satisfiesRange(.{ .major = 2, .minor = 0, .patch = 0 }, "^1.0.0 || ^2.0.0"));
+    try std.testing.expect(!satisfiesRange(.{ .major = 23, .minor = 0, .patch = 0 }, "^22.15.3"));
 }

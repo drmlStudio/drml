@@ -6,7 +6,7 @@ Create a minimal `package.json`. An optional directory lets you initialize a pro
 
 ## `drml install`
 
-Read `package.json`, validate exact versions, resolve registry metadata, download direct packages, write `drml-lock.json`, and extract packages into `node_modules`.
+Read `package.json`, resolve exact versions or common semver ranges, download direct packages, write `drml-lock.json`, and extract packages into `node_modules`.
 
 Use `--lockfile-only` to stop after lockfile generation. This is the mode used by the offline fixture suite.
 
@@ -16,10 +16,10 @@ Scan JavaScript and TypeScript files for undeclared package imports. The checker
 
 ## Current boundaries
 
-The current milestone intentionally refuses:
+The current milestone does not yet provide:
 
-- semver ranges and unsupported dependency protocols
+- every npm semver edge case and unsupported dependency protocols
 - workspace roots and nested workspace packages
-- foreign lockfiles until import adapters exist
+- importing dependency resolutions from foreign lockfiles
 - transitive dependency solving and lifecycle scripts
 - browser-only WebAssembly without a WASI host adapter

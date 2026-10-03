@@ -16,8 +16,8 @@ fn printUsage() void {
         "  drml install --run-scripts  Run dependency lifecycle scripts (default: ignore)\n" ++
         "  drml check             Find imports missing from package.json\n" ++
         "  drml --help            Show this help\n\n" ++
-        "Exact versions are required. Lifecycle scripts are ignored unless\n" ++
-        "--run-scripts is explicitly supplied.\n", .{});
+        "Exact versions and common semver ranges are supported. Existing npm-family\n" ++
+        "lockfiles are ignored; lifecycle scripts run only with --run-scripts.\n", .{});
 }
 
 pub fn main() !void {

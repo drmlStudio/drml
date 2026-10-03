@@ -141,6 +141,12 @@ run_success range-version
 run_success workspace-protocol
 run_workspace_link_success workspace-protocol
 run_success git-dependency
+run_success foreign-package-lock-json
+run_success foreign-npm-shrinkwrap-json
+run_success foreign-pnpm-lock-yaml
+run_success foreign-yarn-lock
+run_success foreign-bun-lock
+run_success foreign-bun-lockb
 run_success omit-dev --omit-dev
 run_success optional-peer
 cp "$TMP/optional-peer/drml-lock.json" "$TMP/optional-peer-default-lock.json"
@@ -181,12 +187,6 @@ auto_failures=(
   "invalid-dependencies-type|InvalidDependencySpec"
   "invalid-peer-meta|InvalidDependencySpec"
   "invalid-package-manager|InvalidPackageManager"
-  "foreign-package-lock-json|found package-lock.json"
-  "foreign-npm-shrinkwrap-json|found npm-shrinkwrap.json"
-  "foreign-pnpm-lock-yaml|found pnpm-lock.yaml"
-  "foreign-yarn-lock|found yarn.lock"
-  "foreign-bun-lock|found bun.lock"
-  "foreign-bun-lockb|found bun.lockb"
 )
 for item in "${auto_failures[@]}"; do
   IFS='|' read -r name needle <<< "$item"
@@ -289,7 +289,7 @@ run_audit_check_success() {
 run_audit_install_failure non-object-array InvalidManifest
 run_audit_install_failure non-object-null InvalidManifest
 run_audit_install_failure leading-zero UnsupportedVersionRange
-run_audit_install_failure duplicate-conflict ConflictingDependencySpec
+run_audit_check_success duplicate-conflict
 
 for command in "install unexpected-argument" "check unexpected-argument" "init one two"; do
   dir="$TMP/audit-cli-${command// /-}"
@@ -302,20 +302,21 @@ for command in "install unexpected-argument" "check unexpected-argument" "init o
 done
 echo "AUDIT CLI ARGUMENTS: PASS"
 
-for name in escaped-name scoped-url duplicate-same; do
+for name in escaped-name scoped-url duplicate-same duplicate-conflict; do
   dir="$TMP/audit-$name"
   mkdir -p "$dir"
   cp -R "$audit_root/$name/." "$dir/"
   (cd "$dir" && "$BIN" install --lockfile-only >stdout 2>stderr)
   python3 -m json.tool "$dir/drml-lock.json" >/dev/null
 done
-python3 - <<'PY' "$TMP/audit-escaped-name/drml-lock.json" "$TMP/audit-scoped-url/drml-lock.json" "$TMP/audit-duplicate-same/drml-lock.json"
+python3 - <<'PY' "$TMP/audit-escaped-name/drml-lock.json" "$TMP/audit-scoped-url/drml-lock.json" "$TMP/audit-duplicate-same/drml-lock.json" "$TMP/audit-duplicate-conflict/drml-lock.json"
 import json, sys
-escaped, scoped, duplicate = [json.load(open(path)) for path in sys.argv[1:]]
+escaped, scoped, duplicate, conflict = [json.load(open(path)) for path in sys.argv[1:]]
 assert escaped["name"] == 'a"b'
 assert scoped["packages"]["@scope/pkg"]["source"].endswith("/@scope/pkg/-/pkg-1.2.3.tgz")
 assert list(duplicate["packages"]) == ["foo"]
 assert duplicate["packages"]["foo"]["dev"] is False
+assert conflict["packages"]["foo"]["requested"] == "1.2.3"
 PY
 echo "AUDIT LOCKFILE ASSERTIONS: PASS"
 
