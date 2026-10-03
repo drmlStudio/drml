@@ -8,7 +8,24 @@ pub const InstallOptions = struct {
     run_scripts: bool = false,
     include_dev: bool = true,
     include_optional_peers: bool = false,
+    verbose: bool = false,
+    json: bool = false,
 };
+
+var active_verbose = false;
+
+fn progress(comptime format: []const u8, args: anytype) void {
+    if (!active_verbose) return;
+    if (std.fs.File.stderr().isTty()) {
+        std.debug.print("\r\x1b[2K\x1b[90mdrml\x1b[0m " ++ format, args);
+    } else {
+        std.debug.print("drml " ++ format ++ "\n", args);
+    }
+}
+
+pub fn finishProgress() void {
+    if (active_verbose and std.fs.File.stderr().isTty()) std.debug.print("\n", .{});
+}
 
 pub const PackageManager = struct {
     allocator: Allocator,
@@ -22,6 +39,7 @@ pub const PackageManager = struct {
     }
 
     pub fn installWithOptions(self: *PackageManager, options: InstallOptions) !usize {
+        active_verbose = options.verbose;
         var manifest = try readManifest(self.allocator, "package.json");
         var packages = std.ArrayList(LockedPackage){};
         var package_indexes = std.StringHashMap(usize).init(self.allocator);
@@ -370,12 +388,12 @@ fn fetchRegistryMetadataNative(allocator: Allocator, name: []const u8) ![]u8 {
     const result = try client.fetch(.{
         .location = .{ .url = url },
         .headers = .{
-            // The abbreviated install document contains the version, dist,
-            // dependency, and peer fields needed by the resolver without the
-            // large descriptions/readmes returned by the default document.
-            .accept = .{ .override = "application/vnd.npm.install-v1+json" },
             .accept_encoding = .{ .override = "identity" },
         },
+        // The abbreviated install document contains the version, dist,
+        // dependency, and peer fields needed by the resolver without the
+        // large descriptions/readmes returned by the default document.
+        .extra_headers = &.{.{ .name = "accept", .value = "application/vnd.npm.install-v1+json" }},
         .response_writer = &body.writer,
     });
     if (result.status != .ok) return error.PackageNotFound;
@@ -553,7 +571,7 @@ fn appendTransitivePackages(allocator: Allocator, metadata_cache: *MetadataCache
     while (index < packages.items.len) : (index += 1) {
         const package = &packages.items[index];
         if (package.git) continue;
-        std.debug.print("drml: resolving metadata {d} for {s}@{s}\n", .{ index + 1, package.name, package.requested });
+        progress("metadata {d} {s}@{s}", .{ index + 1, package.name, package.requested });
         const metadata_source = resolvePackage(allocator, metadata_cache, package) catch |err| {
             std.debug.print("drml: unable to resolve transitive {s}@{s}: {s}\n", .{ package.name, package.requested, @errorName(err) });
             return err;
@@ -708,7 +726,7 @@ fn linkOneBinary(allocator: Allocator, package: *const LockedPackage, name: []co
 
 fn installPackages(allocator: Allocator, packages: []LockedPackage, run_scripts: bool) !void {
     for (packages) |*package| {
-        std.debug.print("drml: resolving {s}@{s}\n", .{ package.name, package.version });
+        progress("fetch {s}@{s}", .{ package.name, package.version });
         if (package.git) {
             try installGitPackage(allocator, package);
             if (run_scripts) try runPackageLifecycle(allocator, package);
@@ -718,7 +736,7 @@ fn installPackages(allocator: Allocator, packages: []LockedPackage, run_scripts:
         defer allocator.free(archive);
         try extractPackage(allocator, package, archive);
         if (run_scripts) try runPackageLifecycle(allocator, package);
-        std.debug.print("drml: installed {s}@{s}\n", .{ package.name, package.version });
+        progress("installed {s}@{s}", .{ package.name, package.version });
     }
 }
 
@@ -893,6 +911,92 @@ pub fn initProject(path: []const u8) !void {
     defer file.close();
     try file.writeAll("{\n  \"name\": \"drml-project\",\n  \"version\": \"0.1.0\",\n  \"private\": true,\n  \"dependencies\": {}\n}\n");
     std.debug.print("created {s}\n", .{full});
+}
+
+pub fn addDependencies(allocator: Allocator, dependencies: []const []const u8, dev_dependencies: []const []const u8) !void {
+    if (dependencies.len == 0 and dev_dependencies.len == 0) return error.InvalidArguments;
+    const file = try std.fs.cwd().openFile("package.json", .{});
+    defer file.close();
+    const source = try file.readToEndAlloc(allocator, 2 * 1024 * 1024);
+    defer allocator.free(source);
+
+    var output = std.ArrayList(u8){};
+    defer output.deinit(allocator);
+    try output.appendSlice(allocator, source[0..]);
+    try insertDependencySection(allocator, &output, "dependencies", dependencies);
+    try insertDependencySection(allocator, &output, "devDependencies", dev_dependencies);
+
+    var temporary = try std.fs.cwd().createFile("package.json.tmp", .{ .truncate = true });
+    defer temporary.close();
+    try temporary.writeAll(output.items);
+    try std.fs.cwd().rename("package.json.tmp", "package.json");
+}
+
+fn insertDependencySection(allocator: Allocator, output: *std.ArrayList(u8), section: []const u8, names: []const []const u8) !void {
+    if (names.len == 0) return;
+    for (names) |name| {
+        for (name) |character| {
+            if (character == '"' or character == '\\' or character < 0x20) return error.InvalidPackageName;
+        }
+    }
+
+    const key = try std.fmt.allocPrint(allocator, "\"{s}\"", .{section});
+    defer allocator.free(key);
+    const key_start = std.mem.indexOf(u8, output.items, key);
+    if (key_start) |start| {
+        const colon = std.mem.indexOfScalarPos(u8, output.items, start + key.len, ':') orelse return error.InvalidManifest;
+        const open = std.mem.indexOfScalarPos(u8, output.items, colon + 1, '{') orelse return error.InvalidManifest;
+        const close = findObjectEnd(output.items, open) orelse return error.InvalidManifest;
+        var insertion = std.ArrayList(u8){};
+        defer insertion.deinit(allocator);
+        const has_entries = std.mem.indexOfScalar(u8, output.items[open + 1 .. close], '"') != null;
+        for (names, 0..) |name, index| {
+            if (std.mem.indexOf(u8, output.items[open + 1 .. close], name) != null) continue;
+            if (has_entries or index != 0) try insertion.appendSlice(allocator, ",");
+            try insertion.writer(allocator).print("\n    \"{s}\": \"latest\"", .{name});
+        }
+        if (insertion.items.len != 0) {
+            try insertion.appendSlice(allocator, "\n");
+            try output.insertSlice(allocator, close, insertion.items);
+        }
+        return;
+    }
+
+    const root_close = std.mem.lastIndexOfScalar(u8, output.items, '}') orelse return error.InvalidManifest;
+    var insertion_point = root_close;
+    while (insertion_point > 0 and std.ascii.isWhitespace(output.items[insertion_point - 1])) : (insertion_point -= 1) {}
+    var insertion = std.ArrayList(u8){};
+    defer insertion.deinit(allocator);
+    const root_has_entries = std.mem.indexOfScalar(u8, output.items[0..root_close], ':') != null;
+    if (root_has_entries) try insertion.appendSlice(allocator, ",");
+    try insertion.writer(allocator).print("\n  \"{s}\": {{", .{section});
+    for (names, 0..) |name, index| {
+        if (index != 0) try insertion.appendSlice(allocator, ",");
+        try insertion.writer(allocator).print("\n    \"{s}\": \"latest\"", .{name});
+    }
+    try insertion.appendSlice(allocator, "\n  }");
+    try output.insertSlice(allocator, insertion_point, insertion.items);
+}
+
+fn findObjectEnd(source: []const u8, open: usize) ?usize {
+    var depth: usize = 0;
+    var quoted = false;
+    var escaped = false;
+    for (source[open..], open..) |character, index| {
+        if (quoted) {
+            if (escaped) escaped = false else if (character == '\\') escaped = true else if (character == '"') quoted = false;
+            continue;
+        }
+        if (character == '"') {
+            quoted = true;
+        } else if (character == '{') {
+            depth += 1;
+        } else if (character == '}') {
+            depth -= 1;
+            if (depth == 0) return index;
+        }
+    }
+    return null;
 }
 
 test "exact versions are accepted" {
