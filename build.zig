@@ -3,23 +3,19 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
     const module = b.createModule(.{
         .root_source_file = b.path("drml/src/main.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
-    if (target.result.os.tag == .macos) {
-        // Zig's macOS libc shims (dispatch, sysctl, realpath, and friends)
-        // are provided by libSystem. Link it explicitly so both the native
-        // executable and `zig build test` work with Xcode SDK toolchains.
-        module.linkSystemLibrary("System", .{});
-    }
 
     const exe = b.addExecutable(.{
         .name = "drml",
         .root_module = module,
     });
+    exe.linkLibC();
 
     b.installFile("drml/package.json", "package.json");
     b.installArtifact(exe);
@@ -40,11 +36,8 @@ pub fn build(b: *std.Build) void {
     const tests = b.addTest(.{
         .root_module = module,
     });
-    if (target.result.os.tag == .macos) {
-        // Keep the test link explicit as well; Zig does not always propagate
-        // system libraries from a shared root module into addTest artifacts.
-        tests.linkSystemLibrary("System");
-    }
+    tests.linkLibC();
+
     const test_step = b.step("test", "Run drml tests");
     test_step.dependOn(&b.addRunArtifact(tests).step);
 }

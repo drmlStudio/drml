@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="45 48 245 304" width="100%" height="100%">
+  <defs>
+    <!-- Seamless wipe mask to reveal the whole crystal without seam gaps -->
+    <clipPath id="crystal-wipe">
+      <rect class="wipe-rect" x="-50" y="-85" width="135" height="170"/>
+    </clipPath>
+  </defs>
+
+  <style>
+    /* 1. Trails draw in rapidly from left to right */
+    .speed-line {
+      stroke-dasharray: 120;
+      stroke-dashoffset: 120;
+      animation: drawLine 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+    .line-top-outer { animation-delay: 0.05s; }
+    .line-top-inner { animation-delay: 0.12s; }
+    .line-bot-inner { animation-delay: 0.10s; }
+    .line-bot-outer { animation-delay: 0.17s; }
+
+    /* 2. Seamless wipe revealing all polygons without edge cracking */
+    .wipe-rect {
+      transform-origin: -45px 0px;
+      animation: wipeIn 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.3s forwards;
+      transform: scaleX(0);
+    }
+
+    /* 3. Snappy arrival punch for the crystal */
+    .crystal-head {
+      transform-origin: 5px 0px;
+      animation: popIn 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.25s forwards;
+      opacity: 0;
+    }
+
+    /* Keyframes - run once, then freeze at final frame (forwards) */
+    @keyframes drawLine {
+      to {
+        stroke-dashoffset: 0;
+      }
+    }
+
+    @keyframes wipeIn {
+      from {
+        transform: scaleX(0);
+      }
+      to {
+        transform: scaleX(1);
+      }
+    }
+
+    @keyframes popIn {
+      0% {
+        opacity: 0;
+        transform: translateX(-18px) scale(0.95);
+      }
+      100% {
+        opacity: 1;
+        transform: translateX(0px) scale(1);
+      }
+    }
+  </style>
+
+  <g transform="translate(200, 200) scale(1.05)">
+    <!-- Speed Lines -->
+    <path class="speed-line line-top-outer" d="M -135,-90 L -60,-35 L -45,-30" fill="none" stroke="#6366f1" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <path class="speed-line line-top-inner" d="M -135,-32 L -60,-15 L -45,-12" fill="none" stroke="#818cf8" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <path class="speed-line line-bot-inner" d="M -135,32 L -60,15 L -45,12" fill="none" stroke="#fb923c" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <path class="speed-line line-bot-outer" d="M -135,90 L -60,35 L -45,30" fill="none" stroke="#ea580c" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- Crystal Head (Faceted Polygons Kept Solid Together) -->
+    <g class="crystal-head" clip-path="url(#crystal-wipe)">
+      <polygon points="-45,-75 -45,75 5,0" fill="#7c3aed"/>
+      <polygon points="-45,-75 35,-42 5,0" fill="#f59e0b"/>
+      <polygon points="35,-42 75,0 5,0" fill="#fde047"/>
+      <polygon points="75,0 35,42 5,0" fill="#ea580c"/>
+      <polygon points="35,42 -45,75 5,0" fill="#9a3412"/>
+    </g>
+  </g>
+</svg>
