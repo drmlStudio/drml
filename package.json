@@ -31,9 +31,9 @@
     "fmt": "zig fmt .",
     "build:test": "zig build test",
     "test:zig": "zig build test",
-    "test:unit": "vitest run --config vitest.config.ts",
+    "test:unit": "vitest run --config vitest.test.ts",
     "test": "npm run test:unit",
-    "test:integration": "vitest run --config vitest.integration.config.ts"
+    "test:integration": "vitest run --config vitest.integration.test.ts"
   },
   "files": [
     "index.js",
