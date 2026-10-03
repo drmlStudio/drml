@@ -25,6 +25,8 @@ pub const PackageManager = struct {
         var manifest = try readManifest(self.allocator, "package.json");
         var packages = std.ArrayList(LockedPackage){};
         var package_indexes = std.StringHashMap(usize).init(self.allocator);
+        var metadata_cache = MetadataCache.init(self.allocator);
+        defer metadata_cache.deinit();
         try appendPackages(self.allocator, &packages, &package_indexes, &manifest.dependencies, false, false, false, manifest.has_workspaces);
         if (options.include_dev) try appendPackages(self.allocator, &packages, &package_indexes, &manifest.dev_dependencies, true, false, false, manifest.has_workspaces);
         try appendPackages(self.allocator, &packages, &package_indexes, &manifest.optional_dependencies, false, true, false, manifest.has_workspaces);
@@ -40,12 +42,12 @@ pub const PackageManager = struct {
         }
         if (options.lockfile_only) {
             for (packages.items) |*package| {
-                if (!package.git and !isExactVersion(package.version)) try resolvePackage(self.allocator, package);
+                if (!package.git and !isExactVersion(package.version)) _ = try resolvePackage(self.allocator, &metadata_cache, package);
             }
         }
         if (!options.lockfile_only) {
             if (comptime builtin.os.tag == .wasi) return error.UnsupportedInstallerTarget;
-            try appendTransitivePackages(self.allocator, &packages, &package_indexes);
+            try appendTransitivePackages(self.allocator, &metadata_cache, &packages, &package_indexes);
             try installPackages(self.allocator, packages.items, options.run_scripts);
             try linkWorkspacePackages(self.allocator, manifest.workspace_paths.items);
         }
@@ -77,6 +79,34 @@ const LockedPackage = struct {
     optional: bool,
     peer: bool,
     git: bool = false,
+};
+
+const MetadataCache = struct {
+    allocator: Allocator,
+    entries: std.StringHashMap([]u8),
+
+    fn init(allocator: Allocator) MetadataCache {
+        return .{ .allocator = allocator, .entries = std.StringHashMap([]u8).init(allocator) };
+    }
+
+    fn deinit(self: *MetadataCache) void {
+        var iterator = self.entries.iterator();
+        while (iterator.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            self.allocator.free(entry.value_ptr.*);
+        }
+        self.entries.deinit();
+    }
+
+    fn getOrFetch(self: *MetadataCache, name: []const u8) ![]const u8 {
+        if (self.entries.get(name)) |metadata| return metadata;
+
+        const metadata = try fetchRegistryMetadata(self.allocator, name);
+        const owned_name = try self.allocator.dupe(u8, name);
+        errdefer self.allocator.free(owned_name);
+        try self.entries.put(owned_name, metadata);
+        return metadata;
+    }
 };
 
 fn jsonString(value: std.json.Value) ?[]const u8 {
@@ -339,7 +369,13 @@ fn fetchRegistryMetadataNative(allocator: Allocator, name: []const u8) ![]u8 {
     defer body.deinit();
     const result = try client.fetch(.{
         .location = .{ .url = url },
-        .headers = .{ .accept_encoding = .{ .override = "identity" } },
+        .headers = .{
+            // The abbreviated install document contains the version, dist,
+            // dependency, and peer fields needed by the resolver without the
+            // large descriptions/readmes returned by the default document.
+            .accept = .{ .override = "application/vnd.npm.install-v1+json" },
+            .accept_encoding = .{ .override = "identity" },
+        },
         .response_writer = &body.writer,
     });
     if (result.status != .ok) return error.PackageNotFound;
@@ -473,9 +509,8 @@ fn selectVersion(allocator: Allocator, versions: std.json.ObjectMap, requested: 
     return try allocator.dupe(u8, selected orelse return error.UnsupportedVersionRange);
 }
 
-fn resolvePackage(allocator: Allocator, package: *LockedPackage) !void {
-    const metadata_source = try fetchRegistryMetadata(allocator, package.name);
-    defer allocator.free(metadata_source);
+fn resolvePackage(allocator: Allocator, metadata_cache: *MetadataCache, package: *LockedPackage) ![]const u8 {
+    const metadata_source = try metadata_cache.getOrFetch(package.name);
     var parsed = try std.json.parseFromSlice(std.json.Value, allocator, metadata_source, .{});
     defer parsed.deinit();
     const root = switch (parsed.value) {
@@ -510,19 +545,19 @@ fn resolvePackage(allocator: Allocator, package: *LockedPackage) !void {
     if (dist.get("integrity")) |integrity_value| {
         if (jsonString(integrity_value)) |integrity| package.integrity = try allocator.dupe(u8, integrity);
     }
+    return metadata_source;
 }
 
-fn appendTransitivePackages(allocator: Allocator, packages: *std.ArrayList(LockedPackage), indexes: *std.StringHashMap(usize)) !void {
+fn appendTransitivePackages(allocator: Allocator, metadata_cache: *MetadataCache, packages: *std.ArrayList(LockedPackage), indexes: *std.StringHashMap(usize)) !void {
     var index: usize = 0;
     while (index < packages.items.len) : (index += 1) {
         const package = &packages.items[index];
         if (package.git) continue;
-        resolvePackage(allocator, package) catch |err| {
+        std.debug.print("drml: resolving metadata {d} for {s}@{s}\n", .{ index + 1, package.name, package.requested });
+        const metadata_source = resolvePackage(allocator, metadata_cache, package) catch |err| {
             std.debug.print("drml: unable to resolve transitive {s}@{s}: {s}\n", .{ package.name, package.requested, @errorName(err) });
             return err;
         };
-        const metadata_source = try fetchRegistryMetadata(allocator, package.name);
-        defer allocator.free(metadata_source);
         var parsed = try std.json.parseFromSlice(std.json.Value, allocator, metadata_source, .{});
         defer parsed.deinit();
         const root = switch (parsed.value) {
@@ -679,7 +714,6 @@ fn installPackages(allocator: Allocator, packages: []LockedPackage, run_scripts:
             if (run_scripts) try runPackageLifecycle(allocator, package);
             continue;
         }
-        try resolvePackage(allocator, package);
         const archive = try downloadPackage(allocator, package);
         defer allocator.free(archive);
         try extractPackage(allocator, package, archive);

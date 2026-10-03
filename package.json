@@ -28,7 +28,7 @@
   },
   "scripts": {
     "build": "zig build -Doptimize=ReleaseSafe",
-    "fmt": "zig fmt drml/src",
+    "fmt": "zig fmt .",
     "build:test": "zig build test"
   },
   "files": [

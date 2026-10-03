@@ -22,10 +22,7 @@
     "drml": "index.js"
   },
   "scripts": {
-    "build": "zig build -Doptimize=ReleaseSafe",
-    "fmt": "zig fmt drml/src",
-    "build:test": "zig build test",
-    "postinstall": "node "
+    "postinstall": "node install.js"
   },
   "files": [
     "index.js",
