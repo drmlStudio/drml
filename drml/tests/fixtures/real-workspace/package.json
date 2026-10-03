@@ -1,0 +1,12 @@
+{
+  "name": "real-workspace-fixture",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "dependencies": {
+    "@fixture/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "semver": "7.7.4"
+  }
+}

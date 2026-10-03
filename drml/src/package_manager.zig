@@ -45,6 +45,7 @@ pub const PackageManager = struct {
         }
         if (!options.lockfile_only) {
             if (comptime builtin.os.tag == .wasi) return error.UnsupportedInstallerTarget;
+            try appendTransitivePackages(self.allocator, &packages, &package_indexes);
             try installPackages(self.allocator, packages.items, options.run_scripts);
             try linkWorkspacePackages(self.allocator, manifest.workspace_paths.items);
         }
@@ -204,6 +205,12 @@ fn isExactVersion(spec: []const u8) bool {
     }
     return count == 3;
 }
+fn isExactPrerelease(spec: []const u8) bool {
+    return std.mem.indexOfScalar(u8, spec, '-') != null and
+        !std.mem.startsWith(u8, spec, "^") and !std.mem.startsWith(u8, spec, "~") and
+        !std.mem.startsWith(u8, spec, ">") and !std.mem.startsWith(u8, spec, "<") and
+        !std.mem.startsWith(u8, spec, "=");
+}
 
 fn validateSpec(name: []const u8, spec: []const u8) !void {
     if (std.mem.startsWith(u8, spec, "workspace:")) return error.UnsupportedWorkspaceProtocol;
@@ -343,7 +350,9 @@ const Version = struct { major: u64, minor: u64, patch: u64 };
 const PartialVersion = struct { version: Version, components: u8 };
 
 fn parsePartialVersion(value: []const u8) ?PartialVersion {
-    var parts = std.mem.splitScalar(u8, std.mem.trim(u8, value, " \t"), '.');
+    var prerelease_parts = std.mem.splitScalar(u8, std.mem.trim(u8, value, " \t"), '-');
+    const without_prerelease = prerelease_parts.next() orelse return null;
+    var parts = std.mem.splitScalar(u8, without_prerelease, '.');
     var numbers: [3]u64 = .{ 0, 0, 0 };
     var count: u8 = 0;
     while (parts.next()) |part| {
@@ -356,7 +365,9 @@ fn parsePartialVersion(value: []const u8) ?PartialVersion {
 }
 
 fn parseVersion(value: []const u8) ?Version {
-    var parts = std.mem.splitScalar(u8, value, '.');
+    var prerelease_parts = std.mem.splitScalar(u8, value, '-');
+    const without_prerelease = prerelease_parts.next() orelse return null;
+    var parts = std.mem.splitScalar(u8, without_prerelease, '.');
     const major = std.fmt.parseInt(u64, parts.next() orelse return null, 10) catch return null;
     const minor = std.fmt.parseInt(u64, parts.next() orelse return null, 10) catch return null;
     const patch_part = parts.next() orelse return null;
@@ -374,6 +385,7 @@ fn compareVersion(left: Version, right: Version) std.math.Order {
 
 fn satisfiesComparator(version: Version, comparator: []const u8) bool {
     const spec = std.mem.trim(u8, comparator, " \t");
+    if (spec.len > 1 and spec[0] == '=') return satisfiesComparator(version, spec[1..]);
     if (spec.len == 0 or std.mem.eql(u8, spec, "*") or std.mem.eql(u8, spec, "x") or std.mem.eql(u8, spec, "X")) return true;
     if (std.mem.startsWith(u8, spec, "^")) {
         const partial = parsePartialVersion(spec[1..]) orelse return false;
@@ -476,8 +488,12 @@ fn resolvePackage(allocator: Allocator, package: *LockedPackage) !void {
         else => return error.InvalidRegistryMetadata,
     };
     if (!isExactVersion(package.version)) {
-        const selected = try selectVersion(allocator, versions, package.requested);
-        package.version = selected;
+        if (isExactPrerelease(package.requested) and versions.get(package.requested) != null) {
+            package.version = try allocator.dupe(u8, package.requested);
+        } else {
+            const selected = try selectVersion(allocator, versions, package.requested);
+            package.version = selected;
+        }
     }
     const version_value = versions.get(package.version) orelse return error.PackageVersionNotFound;
     const version_object = switch (version_value) {
@@ -493,6 +509,45 @@ fn resolvePackage(allocator: Allocator, package: *LockedPackage) !void {
     package.source = try allocator.dupe(u8, tarball);
     if (dist.get("integrity")) |integrity_value| {
         if (jsonString(integrity_value)) |integrity| package.integrity = try allocator.dupe(u8, integrity);
+    }
+}
+
+fn appendTransitivePackages(allocator: Allocator, packages: *std.ArrayList(LockedPackage), indexes: *std.StringHashMap(usize)) !void {
+    var index: usize = 0;
+    while (index < packages.items.len) : (index += 1) {
+        const package = &packages.items[index];
+        if (package.git) continue;
+        resolvePackage(allocator, package) catch |err| {
+            std.debug.print("drml: unable to resolve transitive {s}@{s}: {s}\n", .{ package.name, package.requested, @errorName(err) });
+            return err;
+        };
+        const metadata_source = try fetchRegistryMetadata(allocator, package.name);
+        defer allocator.free(metadata_source);
+        var parsed = try std.json.parseFromSlice(std.json.Value, allocator, metadata_source, .{});
+        defer parsed.deinit();
+        const root = switch (parsed.value) {
+            .object => |object| object,
+            else => return error.InvalidRegistryMetadata,
+        };
+        const versions = switch (root.get("versions") orelse return error.InvalidRegistryMetadata) {
+            .object => |object| object,
+            else => return error.InvalidRegistryMetadata,
+        };
+        const version_value = versions.get(package.version) orelse {
+            std.debug.print("drml: metadata for {s}@{s} did not contain the selected version\n", .{ package.name, package.version });
+            return error.PackageVersionNotFound;
+        };
+        const version_object = switch (version_value) {
+            .object => |object| object,
+            else => return error.InvalidRegistryMetadata,
+        };
+        for ([_][]const u8{ "dependencies", "optionalDependencies" }) |section| {
+            const value = version_object.get(section) orelse continue;
+            if (value != .object) return error.InvalidDependencySpec;
+            var dependencies = try readObjectMap(allocator, value);
+            defer dependencies.deinit();
+            try appendPackages(allocator, packages, indexes, &dependencies, false, std.mem.eql(u8, section, "optionalDependencies"), false, true);
+        }
     }
 }
 
@@ -682,7 +737,14 @@ fn linkWorkspacePackages(allocator: Allocator, manifests: []const []const u8) !v
         defer allocator.free(target);
         const link_path = try std.fs.path.join(allocator, &.{ "node_modules", name });
         defer allocator.free(link_path);
-        std.fs.cwd().deleteFile(link_path) catch {};
+        if (std.fs.path.dirname(link_path)) |parent| try std.fs.cwd().makePath(parent);
+        // A workspace can also appear as a normal dependency of another
+        // workspace. In that case installation has already created a real
+        // directory at this path; deleteFile only handles symlinks/files and
+        // makes the subsequent symlink creation fail with PathAlreadyExists.
+        std.fs.cwd().deleteTree(link_path) catch |err| {
+            if (err != error.FileNotFound) return err;
+        };
         try std.fs.cwd().symLink(target, link_path, .{});
     }
 }
@@ -714,7 +776,23 @@ fn runProcess(allocator: Allocator, argv: []const []const u8, cwd: ?[]const u8) 
 }
 
 fn runProcessNative(allocator: Allocator, argv: []const []const u8, cwd: ?[]const u8) !void {
-    const result = try std.process.Child.run(.{ .allocator = allocator, .argv = argv, .cwd = cwd, .max_output_bytes = 256 * 1024 });
+    var env = try std.process.getEnvMap(allocator);
+    defer env.deinit();
+    const local_bin = if (cwd) |directory|
+        try std.fs.path.join(allocator, &.{ directory, "node_modules", ".bin" })
+    else
+        try allocator.dupe(u8, "node_modules/.bin");
+    defer allocator.free(local_bin);
+    const root_bin = if (cwd) |directory|
+        try std.fs.path.join(allocator, &.{ directory, "..", ".bin" })
+    else
+        try allocator.dupe(u8, "node_modules/.bin");
+    defer allocator.free(root_bin);
+    const inherited_path = env.get("PATH") orelse "";
+    const path = try std.fmt.allocPrint(allocator, "{s}:{s}:{s}", .{ local_bin, root_bin, inherited_path });
+    defer allocator.free(path);
+    try env.put("PATH", path);
+    const result = try std.process.Child.run(.{ .allocator = allocator, .argv = argv, .cwd = cwd, .env_map = &env, .max_output_bytes = 256 * 1024 });
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
     if (result.stdout.len != 0) std.debug.print("{s}", .{result.stdout});
@@ -731,13 +809,28 @@ fn runCommand(allocator: Allocator, command: []const u8, cwd: ?[]const u8) !void
 }
 
 pub fn runScript(allocator: Allocator, script_name: []const u8, args: []const []const u8) !void {
+    const pre_name = try std.fmt.allocPrint(allocator, "pre{s}", .{script_name});
+    defer allocator.free(pre_name);
+    if (try packageJsonScript(allocator, "package.json", pre_name)) |pre_command| {
+        defer allocator.free(pre_command);
+        try runCommand(allocator, pre_command, null);
+    }
     const command = (try packageJsonScript(allocator, "package.json", script_name)) orelse return error.ScriptNotFound;
     defer allocator.free(command);
+    try runScriptCommand(allocator, command, args, null);
+    const post_name = try std.fmt.allocPrint(allocator, "post{s}", .{script_name});
+    defer allocator.free(post_name);
+    if (try packageJsonScript(allocator, "package.json", post_name)) |post_command| {
+        defer allocator.free(post_command);
+        try runCommand(allocator, post_command, null);
+    }
+}
+fn runScriptCommand(allocator: Allocator, command: []const u8, args: []const []const u8, cwd: ?[]const u8) !void {
     var argv = std.ArrayList([]const u8){};
     defer argv.deinit(allocator);
     try argv.appendSlice(allocator, &.{ "sh", "-c", command, "drml-run" });
     try argv.appendSlice(allocator, args);
-    try runProcess(allocator, argv.items, null);
+    try runProcess(allocator, argv.items, cwd);
 }
 
 pub fn execCommand(allocator: Allocator, argv: []const []const u8) !void {
@@ -776,6 +869,8 @@ test "exact versions are accepted" {
 
 test "common semver ranges are accepted" {
     try std.testing.expect(satisfiesRange(.{ .major = 22, .minor = 16, .patch = 0 }, "^22.15.3"));
+    try std.testing.expect(satisfiesRange(.{ .major = 4, .minor = 0, .patch = 0 }, "^4.0.0-rc.1"));
+    try std.testing.expect(satisfiesRange(.{ .major = 0, .minor = 133, .patch = 0 }, "=0.133.0"));
     try std.testing.expect(satisfiesRange(.{ .major = 1, .minor = 3, .patch = 7 }, ">=1.0.0 <2.0.0"));
     try std.testing.expect(satisfiesRange(.{ .major = 2, .minor = 0, .patch = 0 }, "^1.0.0 || ^2.0.0"));
     try std.testing.expect(!satisfiesRange(.{ .major = 23, .minor = 0, .patch = 0 }, "^22.15.3"));

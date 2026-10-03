@@ -1,0 +1,11 @@
+{
+  "name": "real-scoped-fixture",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@babel/runtime": "7.27.6"
+  },
+  "optionalDependencies": {
+    "is-number": "7.0.0"
+  }
+}

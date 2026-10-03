@@ -8,9 +8,9 @@
 [![Built with Zig](https://img.shields.io/badge/built%20with-Zig-F7A41D?logo=zig&logoColor=white)](https://ziglang.org/)
 [![Docs](https://img.shields.io/badge/docs-VitePress-646CFF?logo=vitepress&logoColor=white)](https://github.com/drmlStudio/drml/tree/main/website)
 
-`drml` is a package manager for JavaScript and TypeScript projects, written in Zig. It reads `package.json`, resolves direct registry dependencies, writes an inspectable `drml-lock.json`, and installs packages into `node_modules`.
+`drml` is a package manager for JavaScript and TypeScript projects, written in Zig. It reads `package.json`, resolves registry dependencies (including transitives), writes an inspectable `drml-lock.json`, and installs packages into `node_modules`.
 
-> **Status:** early development. The CLI and lockfile format are still evolving. The current implementation handles direct dependencies, workspace packages, Git dependencies, common semver ranges, and a source import checker.
+> **Status:** early development. The CLI and lockfile format are still evolving. The current implementation handles workspace packages, Git dependencies, common semver/prerelease ranges, npm-style script hooks, and a source import checker.
 
 ## Install and build
 
@@ -96,7 +96,7 @@ The installer reads these dependency fields:
 
 Repeated package names across these sections are combined into one lockfile entry. The first declaration supplies the requested version; later declarations contribute their `dev`, `optional`, and `peer` markers. This prevents a package listed with, for example, `^22.15.3` in one section and `22.15.3` in another from failing with `ConflictingDependencySpec`.
 
-Common exact and partial versions and semver ranges such as caret (`^22.15`), tilde (`~22.15`), comparator sets (`>=22.0 <23.0.0`), wildcards, and `||` alternatives are supported during registry resolution. Git URLs and `workspace:` dependencies are also recognized where applicable.
+Common exact and partial versions and semver ranges such as caret (`^22.15`), tilde (`~22.15`), prereleases (`^4.0.0-rc.1`), comparator sets (`>=22.0 <23.0.0`), wildcards, and `||` alternatives are supported during registry resolution. Git URLs and `workspace:` dependencies are also recognized where applicable.
 
 Existing npm, pnpm, Yarn, Bun, and npm shrinkwrap lockfiles are left in place and do not prevent drml from generating `drml-lock.json`. drml does not import their contents yet; `drml-lock.json` is its own lockfile.
 
@@ -114,15 +114,15 @@ Example:
 
 ## Current limitations
 
-The current resolver is for direct dependencies and does not yet provide:
+The current resolver does not yet provide:
 
-- transitive dependency solving and lockfile reuse
+- reuse/import of npm, pnpm, Yarn, or Bun lockfiles
 
 - executable shims for every package-manager edge case
 
 - browser-only WebAssembly without a separate host adapter
 
-- complete npm semver behavior, including every prerelease and exotic protocol form
+- complete npm semver behavior, including every exotic protocol form
 
 These are implementation notes for the current release, not restrictions on the presence of another package manager's lockfile.
 
@@ -137,12 +137,14 @@ zig build -Dtarget=wasm32-wasi -Doptimize=ReleaseSafe
 ./drml/tests/run-fixtures.sh
 ```
 
-The fixture corpus covers ordinary manifests, semver ranges, duplicate dependency declarations, foreign lockfiles, workspaces, source checking, and regression cases. Registry-backed fixtures are opt-in:
+The fixture corpus covers ordinary manifests, semver ranges, duplicate dependency declarations, foreign lockfiles, workspaces, transitive dependencies, script hooks, source checking, and regression cases. Registry-backed fixtures are opt-in:
 
 ```
 DRML_LIVE_TESTS=1 ./drml/tests/run-fixtures.sh
 ./drml/tests/run-live-install.sh
 ```
+
+The live matrix also includes small real-world-style projects for transitive dependencies, prerelease and `=` ranges, scoped packages, workspace links, optional dependencies, and npm-compatible CLI script hooks. This keeps the end-to-end checks fast while covering behavior that large repositories often expose.
 
 Keep Zig formatting clean:
 

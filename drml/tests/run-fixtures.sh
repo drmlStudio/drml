@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FIXTURES="$ROOT/tests/fixtures"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+FIXTURES="$ROOT/drml/tests/fixtures"
 BIN="${DRML_BIN:-$ROOT/zig-out/bin/drml}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -87,12 +87,14 @@ run_script_success() {
     exit 1
   fi
   test "$(cat "$dir/test-output.txt")" = "run-ok"
+  test "$(cat "$dir/pretest-output.txt")" = "pre-ok"
   if ! (cd "$dir" && "$BIN" test implicit-ok >stdout 2>stderr); then
     echo "FAIL (implicit script expected success): $name"
     cat "$dir/stderr"
     exit 1
   fi
   test "$(cat "$dir/test-output.txt")" = "implicit-ok"
+  test "$(cat "$dir/pretest-output.txt")" = "pre-ok"
   pass_count=$((pass_count + 1))
   echo "RUN PASS: $name"
 }
@@ -153,6 +155,39 @@ cp "$TMP/optional-peer/drml-lock.json" "$TMP/optional-peer-default-lock.json"
 run_success optional-peer --include-optional-peers
 run_success workspace-dev
 run_success lifecycle-option --run-scripts
+
+run_live_success() {
+  local name="$1"
+  local dir="$TMP/live-$name"
+  mkdir -p "$dir"
+  cp -R "$FIXTURES/$name/." "$dir/"
+  if ! (cd "$dir" && "$BIN" install >stdout 2>stderr); then
+    echo "FAIL (live real-life install expected success): $name"
+    cat "$dir/stderr"
+    exit 1
+  fi
+  test -s "$dir/drml-lock.json"
+  pass_count=$((pass_count + 1))
+  echo "LIVE REAL-LIFE PASS: $name"
+}
+
+if [[ "${DRML_LIVE_TESTS:-0}" == "1" ]]; then
+  run_live_success real-transitive
+  run_live_success real-prerelease
+  run_live_success real-workspace
+  run_live_success real-scoped
+  run_live_success real-cli-script
+  test -d "$TMP/live-real-transitive/node_modules/is-number"
+  (cd "$TMP/live-real-transitive" && "$BIN" run test >stdout 2>stderr)
+  test -L "$TMP/live-real-workspace/node_modules/@fixture/shared"
+  test -d "$TMP/live-real-workspace/node_modules/is-number"
+  test -d "$TMP/live-real-scoped/node_modules/@babel/runtime"
+  (cd "$TMP/live-real-cli-script" && "$BIN" run test >stdout 2>stderr)
+  test "$(cat "$TMP/live-real-cli-script/pre-hook.txt")" = "pre-hook"
+  test "$(cat "$TMP/live-real-cli-script/post-hook.txt")" = "post-hook"
+else
+  echo "SKIP: small real-life install fixtures (set DRML_LIVE_TESTS=1)"
+fi
 
 python3 - <<'PY' "$TMP/omit-dev/drml-lock.json" "$TMP/optional-peer-default-lock.json" "$TMP/optional-peer/drml-lock.json" "$TMP/workspace-dev/drml-lock.json"
 import json, sys
@@ -218,7 +253,7 @@ run_check_success() {
   local name="$1"
   local dir="$TMP/check-$name"
   mkdir -p "$dir"
-  cp -R "$ROOT/tests/check-fixtures/$name/." "$dir/"
+  cp -R "$ROOT/drml/tests/check-fixtures/$name/." "$dir/"
   if ! (cd "$dir" && "$BIN" check >stdout 2>stderr); then
     echo "FAIL (checker expected success): $name"
     cat "$dir/stderr"
@@ -231,7 +266,7 @@ run_check_failure() {
   local name="$1"
   local dir="$TMP/check-$name"
   mkdir -p "$dir"
-  cp -R "$ROOT/tests/check-fixtures/$name/." "$dir/"
+  cp -R "$ROOT/drml/tests/check-fixtures/$name/." "$dir/"
   if (cd "$dir" && "$BIN" check >stdout 2>stderr); then
     echo "FAIL (checker expected failure): $name"
     exit 1
@@ -245,7 +280,7 @@ run_check_failure() {
 run_check_success clean
 run_check_failure missing
 
-audit_root="$ROOT/tests/audit-fixtures"
+audit_root="$ROOT/drml/tests/audit-fixtures"
 
 run_audit_install_failure() {
   local name="$1"

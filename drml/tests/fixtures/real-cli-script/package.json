@@ -1,0 +1,13 @@
+{
+  "name": "real-cli-script-fixture",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "pretest": "printf pre-hook > pre-hook.txt",
+    "test": "semver 7.7.4",
+    "posttest": "printf post-hook > post-hook.txt"
+  },
+  "devDependencies": {
+    "semver": "7.7.4"
+  }
+}

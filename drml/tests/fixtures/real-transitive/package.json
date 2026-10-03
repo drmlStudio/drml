@@ -1,0 +1,14 @@
+{
+  "name": "real-transitive-fixture",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test": "semver 7.7.4"
+  },
+  "dependencies": {
+    "is-odd": "3.0.1"
+  },
+  "devDependencies": {
+    "semver": "7.7.4"
+  }
+}

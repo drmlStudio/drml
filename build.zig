@@ -14,11 +14,11 @@ pub fn build(b: *std.Build) void {
         .root_module = module,
     });
 
-    b.installFile("package.json", "package.json");
+    b.installFile("drml/package.json", "package.json");
     b.installArtifact(exe);
     b.installFile("README.md", "README.md");
-    b.installFile("LICENSE", "LICENSE");
-    b.installFile("index.js", "index.js");
+    b.installFile("drml/LICENSE", "LICENSE");
+    b.installFile("drml/index.js", "index.js");
 
     const package_step = b.step("package", "Build a distributable npm package in zig-out");
     package_step.dependOn(b.getInstallStep());

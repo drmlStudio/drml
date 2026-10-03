@@ -13,6 +13,7 @@ pub const PackageChecker = struct {
         var declared = try readDeclaredPackages(self.allocator);
         var root = try std.fs.cwd().openDir(".", .{ .iterate = true });
         defer root.close();
+        try collectManifestPackages(self.allocator, root, &declared);
         const violations = try scanDirectory(self.allocator, root, "", &declared);
 
         if (violations != 0) return error.UndeclaredPackages;
@@ -65,14 +66,17 @@ fn checkFile(allocator: Allocator, dir: std.fs.Dir, basename: []const u8, path: 
 }
 
 fn readDeclaredPackages(allocator: Allocator) !std.StringHashMap(void) {
-    const file = try std.fs.cwd().openFile("package.json", .{});
+    var declared = std.StringHashMap(void).init(allocator);
+    try addManifestPackages(allocator, std.fs.cwd(), &declared);
+    return declared;
+}
+fn addManifestPackages(allocator: Allocator, dir: std.fs.Dir, declared: *std.StringHashMap(void)) !void {
+    const file = dir.openFile("package.json", .{}) catch return;
     defer file.close();
     const source = try file.readToEndAlloc(allocator, 2 * 1024 * 1024);
     defer allocator.free(source);
     var parsed = try std.json.parseFromSlice(std.json.Value, allocator, source, .{});
     defer parsed.deinit();
-
-    var declared = std.StringHashMap(void).init(allocator);
     const root = switch (parsed.value) {
         .object => |object| object,
         else => return error.InvalidManifest,
@@ -89,7 +93,16 @@ fn readDeclaredPackages(allocator: Allocator) !std.StringHashMap(void) {
             }
         }
     }
-    return declared;
+}
+fn collectManifestPackages(allocator: Allocator, dir: std.fs.Dir, declared: *std.StringHashMap(void)) !void {
+    try addManifestPackages(allocator, dir, declared);
+    var iterator = dir.iterate();
+    while (try iterator.next()) |entry| {
+        if (entry.kind != .directory or isIgnoredDirectory(entry.name)) continue;
+        var child = try dir.openDir(entry.name, .{ .iterate = true });
+        try collectManifestPackages(allocator, child, declared);
+        child.close();
+    }
 }
 
 fn isSourceFile(path: []const u8) bool {
@@ -104,19 +117,19 @@ fn isSourceFile(path: []const u8) bool {
 }
 
 fn isIgnoredPath(path: []const u8) bool {
-    const ignored = [_][]const u8{ "node_modules/", ".git/", "dist/", "build/", ".next/", ".turbo/", "coverage/", ".cache/" };
+    const ignored = [_][]const u8{ "node_modules/", ".git/", "dist/", "build/", ".next/", ".turbo/", "coverage/", ".cache/", "test/", "tests/" };
     for (ignored) |segment| if (std.mem.indexOf(u8, path, segment) != null) return true;
     return false;
 }
 
 fn isIgnoredDirectory(name: []const u8) bool {
-    const ignored = [_][]const u8{ "node_modules", ".git", "dist", "build", ".next", ".turbo", "coverage", ".cache" };
+    const ignored = [_][]const u8{ "node_modules", ".git", "dist", "build", ".next", ".turbo", "coverage", ".cache", "test", "tests" };
     for (ignored) |segment| if (std.mem.eql(u8, name, segment)) return true;
     return false;
 }
 
 fn packageName(specifier: []const u8) ?[]const u8 {
-    if (specifier.len == 0 or specifier[0] == '.' or specifier[0] == '/' or specifier[0] == '#') return null;
+    if (specifier.len == 0 or specifier[0] == '.' or specifier[0] == '/' or specifier[0] == '#' or std.mem.startsWith(u8, specifier, "astro:")) return null;
     if (std.mem.startsWith(u8, specifier, "node:")) return null;
     if (std.mem.eql(u8, specifier, "assert") or std.mem.eql(u8, specifier, "assert/strict") or
         std.mem.eql(u8, specifier, "async_hooks") or std.mem.eql(u8, specifier, "buffer") or
@@ -140,7 +153,7 @@ fn packageName(specifier: []const u8) ?[]const u8 {
         std.mem.eql(u8, specifier, "url") or std.mem.eql(u8, specifier, "util") or
         std.mem.eql(u8, specifier, "v8") or std.mem.eql(u8, specifier, "vm") or
         std.mem.eql(u8, specifier, "wasi") or std.mem.eql(u8, specifier, "worker_threads") or
-        std.mem.eql(u8, specifier, "sqlite") or
+        std.mem.eql(u8, specifier, "sqlite") or std.mem.eql(u8, specifier, "bun:test") or
         std.mem.eql(u8, specifier, "zlib")) return null;
 
     if (specifier[0] == '@') {

@@ -1,0 +1,9 @@
+{
+  "name": "real-prerelease-fixture",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "std-env": "^4.0.0-rc.1",
+    "@oxc-project/types": "=0.133.0"
+  }
+}

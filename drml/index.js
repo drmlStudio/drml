@@ -7,7 +7,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const wasmPath = join(__dirname, 'bin', 'drml.wasm');
 
 const sourceExtensions = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.mts', '.cts']);
-const ignoredDirectories = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.turbo', 'coverage', '.cache']);
+const ignoredDirectories = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.turbo', 'coverage', '.cache', 'test', 'tests']);
 const nodeBuiltins = new Set([
   'assert', 'assert/strict', 'async_hooks', 'buffer', 'child_process', 'cluster', 'console', 'constants',
   'crypto', 'dgram', 'diagnostics_channel', 'dns', 'dns/promises', 'domain', 'events', 'fs', 'fs/promises',
@@ -15,11 +15,11 @@ const nodeBuiltins = new Set([
   'perf_hooks', 'process', 'punycode', 'querystring', 'readline', 'readline/promises', 'repl', 'stream',
   'stream/consumers', 'stream/promises', 'stream/web', 'string_decoder', 'sys', 'test', 'test/reporters',
   'timers', 'timers/promises', 'tls', 'trace_events', 'tty', 'url', 'util', 'util/types', 'v8', 'vm',
-  'wasi', 'worker_threads', 'zlib', 'sqlite',
+  'wasi', 'worker_threads', 'zlib', 'sqlite', 'bun:test',
 ]);
 
 function packageName(specifier) {
-  if (!specifier || specifier.startsWith('.') || specifier.startsWith('/') || specifier.startsWith('#') || specifier.startsWith('node:')) return null;
+  if (!specifier || specifier.startsWith('.') || specifier.startsWith('/') || specifier.startsWith('#') || specifier.startsWith('node:') || specifier.startsWith('astro:')) return null;
   if (nodeBuiltins.has(specifier)) return null;
   if (specifier.startsWith('@')) {
     const first = specifier.indexOf('/');
@@ -38,7 +38,7 @@ function importedPackages(source) {
     /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
     /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
     /\bimport\s+['"]([^'"]+)['"]/g,
-    /\b(?:from|export\s+\*?\s*from)\s*['"]([^'"]+)['"]/g,
+    /\b(?:import|export)\s+[^'"\n;]*?\bfrom\s*['"]([^'"]+)['"]/g,
   ];
   for (const pattern of patterns) {
     for (const match of withoutComments.matchAll(pattern)) {
@@ -50,11 +50,22 @@ function importedPackages(source) {
 }
 
 async function runNodeCheck() {
-  const manifest = JSON.parse(await readFile('package.json', 'utf8'));
   const declared = new Set();
-  for (const section of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']) {
-    for (const name of Object.keys(manifest[section] ?? {})) declared.add(name);
+  async function collectManifests(directory) {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (entry.isDirectory() && ignoredDirectories.has(entry.name)) continue;
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await collectManifests(path);
+      } else if (entry.isFile() && entry.name === 'package.json') {
+        const manifest = JSON.parse(await readFile(path, 'utf8'));
+        for (const section of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']) {
+          for (const name of Object.keys(manifest[section] ?? {})) declared.add(name);
+        }
+      }
+    }
   }
+  await collectManifests('.');
   const violations = [];
   async function scan(directory, prefix = '') {
     for (const entry of await readdir(directory, { withFileTypes: true })) {

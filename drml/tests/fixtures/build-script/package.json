@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "scripts": {
     "build": "printf build-ok > build-output.txt",
+    "pretest": "printf pre-ok > pretest-output.txt",
     "test": "printf \"$1\" > test-output.txt"
   }
 }
