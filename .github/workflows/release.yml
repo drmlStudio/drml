@@ -13,7 +13,7 @@ env:
 
 jobs:
   release:
-    name: Build WASM & Publish
+    name: Build native packages and publish
     runs-on: ubuntu-latest
 
     steps:
@@ -28,19 +28,125 @@ jobs:
           tar -xJf /tmp/zig.tar.xz -C /tmp
           echo "/tmp/zig-x86_64-linux-${ZIG_VERSION}" >> "$GITHUB_PATH"
 
-      - name: Build WASM
-        shell: bash
-        run: |
-          set -euo pipefail
-          zig build -Dtarget=wasm32-wasi -Doptimize=ReleaseSafe
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
-      - name: Publish to npm
+      - name: Build native packages and CLI wrapper
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+
+          version="${RELEASE_TAG#v}"
+          if [[ -z "$version" ]]; then
+            echo "Release tag must contain an npm version." >&2
+            exit 1
+          fi
+
+          dist_root="$PWD/dist/npm"
+          release_assets="$PWD/dist/release"
+          rm -rf "$PWD/dist"
+          mkdir -p "$dist_root" "$release_assets"
+
+          native_dirs=()
+          native_packages=()
+
+          while IFS='|' read -r zig_target package_name os cpu libc binary_name; do
+            [[ -z "$zig_target" ]] && continue
+
+            package_dir="$dist_root/${package_name#@drml/}"
+            rm -rf zig-out
+            zig build -Dtarget="$zig_target" -Doptimize=ReleaseSafe
+
+            source_binary="zig-out/bin/$binary_name"
+            if [[ ! -f "$source_binary" ]]; then
+              echo "Expected $source_binary after building $zig_target" >&2
+              exit 1
+            fi
+
+            mkdir -p "$package_dir/bin"
+            install -m 0755 "$source_binary" "$package_dir/bin/$binary_name"
+            cp README.md LICENSE "$package_dir/"
+
+            node --input-type=module - "$package_dir" "$package_name" "$version" "$os" "$cpu" "$libc" <<'NODE'
+          import { writeFile } from 'node:fs/promises';
+
+          const [directory, name, version, os, cpu, libc] = process.argv.slice(2);
+          const manifest = {
+            name,
+            version,
+            description: 'Binaries for @drml/cli.',
+            license: 'MIT',
+            repository: {
+              type: 'git',
+              url: 'https://github.com/drmlStudio/drml.git',
+            },
+            homepage: 'https://github.com/drmlStudio/drml',
+            bugs: {
+              url: 'https://github.com/drmlStudio/drml/issues',
+            },
+            os: [os],
+            cpu: [cpu],
+            files: ['bin', 'README.md', 'LICENSE'],
+          };
+          if (libc !== '') manifest.libc = [libc];
+          await writeFile(`${directory}/package.json`, `${JSON.stringify(manifest, null, 2)}\n`);
+          NODE
+
+            asset_name="drml-${zig_target}"
+            if [[ "$binary_name" == *.exe ]]; then
+              asset_name+=".exe"
+            fi
+            install -m 0755 "$source_binary" "$release_assets/$asset_name"
+
+            native_dirs+=("$package_dir")
+            native_packages+=("$package_name")
+          done <<'TARGETS'
+          x86_64-windows|@drml/x86_64-windows|win32|x64||drml.exe
+          aarch64-windows|@drml/aarch64-windows|win32|arm64||drml.exe
+          aarch64-macos|@drml/aarch64-macos|darwin|arm64||drml
+          x86_64-macos|@drml/x86_64-macos|darwin|x64||drml
+          x86_64-linux-gnu|@drml/x86_64-linux-gnu|linux|x64|glibc|drml
+          aarch64-linux-gnu|@drml/aarch64-linux-gnu|linux|arm64|glibc|drml
+          x86_64-linux-musl|@drml/x86_64-linux-musl|linux|x64|musl|drml
+          aarch64-linux-musl|@drml/aarch64-linux-musl|linux|arm64|musl|drml
+          TARGETS
+
+          cli_dir="$dist_root/cli"
+          mkdir -p "$cli_dir"
+          cp drml/index.js drml/native.js drml/install.js README.md LICENSE "$cli_dir/"
+          DRML_NATIVE_PACKAGES="$(IFS=,; echo "${native_packages[*]}")" \
+            node --input-type=module - "$cli_dir" "$version" <<'NODE'
+          import { readFile, writeFile } from 'node:fs/promises';
+
+          const [directory, version] = process.argv.slice(2);
+          const manifest = JSON.parse(await readFile('drml/package.json', 'utf8'));
+          manifest.version = version;
+          manifest.optionalDependencies = Object.fromEntries(
+            process.env.DRML_NATIVE_PACKAGES.split(',').map((name) => [name, version])
+          );
+          await writeFile(`${directory}/package.json`, `${JSON.stringify(manifest, null, 2)}\n`);
+          NODE
+
+          # Smoke-test the wrapper against the native Linux package it will use
+          # on the Ubuntu release runner, then remove this test-only dependency.
+          test_package="$cli_dir/node_modules/@drml/x86_64-linux-gnu"
+          mkdir -p "$(dirname "$test_package")"
+          cp -R "$dist_root/x86_64-linux-gnu/." "$test_package/"
+          node "$cli_dir/install.js"
+          node "$cli_dir/index.js" --help
+          rm -rf "$cli_dir/node_modules"
+
+          # Verify every published archive contains only its intended payload.
+          for package_dir in "${native_dirs[@]}" "$cli_dir"; do
+            npm pack --dry-run "$package_dir"
+          done
+
+      - name: Publish native packages to npm
         shell: bash
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -49,18 +155,41 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
-
           npm_tag="latest"
           if [[ "$IS_PRERELEASE" == "true" ]] || [[ "$version" == *-* ]]; then
             npm_tag="beta"
           fi
 
-          cd zig-out
-          npm publish --provenance --access public --tag "$npm_tag"
+          for package_dir in \
+            dist/npm/x86_64-windows \
+            dist/npm/aarch64-windows \
+            dist/npm/aarch64-macos \
+            dist/npm/x86_64-macos \
+            dist/npm/x86_64-linux-gnu \
+            dist/npm/aarch64-linux-gnu \
+            dist/npm/x86_64-linux-musl \
+            dist/npm/aarch64-linux-musl; do
+            npm publish "$package_dir" --provenance --access public --tag "$npm_tag"
+          done
+
+      - name: Publish @drml/cli to npm
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          IS_PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          npm_tag="latest"
+          if [[ "$IS_PRERELEASE" == "true" ]] || [[ "$version" == *-* ]]; then
+            npm_tag="beta"
+          fi
+
+          npm publish dist/npm/cli --provenance --access public --tag "$npm_tag"
 
       - name: Upload GitHub Release Assets
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.release.tag_name }}
-          files: |
-            zig-out/bin/drml.wasm
+          files: dist/release/*

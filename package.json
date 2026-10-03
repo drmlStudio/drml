@@ -19,16 +19,22 @@
     "typescript",
     "zig"
   ],
+  "workspaces": [
+    "drml",
+    "website"
+  ],
   "bin": {
     "drml": "index.js"
   },
   "scripts": {
-    "build": "zig build -Dtarget=wasm32-wasi -Doptimize=ReleaseSafe",
+    "build": "zig build -Doptimize=ReleaseSafe",
     "fmt": "zig fmt drml/src",
     "build:test": "zig build test"
   },
   "files": [
     "index.js",
+    "install.js",
+    "native.js",
     "bin",
     "README.md",
     "LICENSE"

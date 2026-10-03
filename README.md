@@ -1,4 +1,4 @@
-![Logo](https://private-us-east-1.manuscdn.com/sessionFile/jgg7caFXEjyv0DgxhYNwpO/sandbox/kYjabx4USuepQStE16MPza-images_1791019684898_na1fn_L2hvbWUvdWJ1bnR1L2RybWwtYXVkaXQvcmVwby9hc3NldHMvbG9nby1kcm1sLWJsYWNr.svg?Expires=1791192486&Signature=MEYCIQD459IavKHTKKrdDzZprNzXvlvhXHqi6ipZFkuFkD3QXQIhAKYstnXzktTxxrK3JyQnVGAqiLJfjNrtUAOu-vpc-X1v&Key-Pair-Id=K1K5N5YNBUUMMN)
+![Logo](./assets/logo-drml-black.svg)
 
 # drml
 
@@ -22,12 +22,15 @@ cd drml
 zig build
 ```
 
-The default build creates a ready-to-pack directory at `zig-out/`:
+The default build creates a ready-to-pack native development directory at `zig-out/`:
 
 ```
 zig-out/
-├── bin/drml       # executable
-├── package.json   # npm package manifest; bin.drml points to bin/drml
+├── bin/drml       # native executable for the host
+├── package.json   # npm package manifest; bin.drml points to index.js
+├── index.js        # finds and runs the native executable
+├── native.js       # host/platform package resolver
+├── install.js      # package installation verifier
 ├── README.md
 └── LICENSE
 ```
@@ -65,7 +68,7 @@ Commands operate on the current working directory unless `init` receives a direc
 | `--include-optional-peers` | `install` | Include optional peer dependencies. Optional peers are omitted by default. |
 | `--run-scripts` | `install` | Run dependency `preinstall`, `install`, and `postinstall` scripts after extraction. Scripts are ignored by default. |
 
-`--version` prints the CLI version. Errors return a non-zero exit code, including from the NPM/WASI launcher.
+`--version` prints the CLI version. Errors return a non-zero exit code, including from the npm native launcher.
 
 ### Commands
 
@@ -128,12 +131,11 @@ These are implementation notes for the current release, not restrictions on the 
 
 ## Development
 
-Run the unit tests, native build, WASI build, and fixture matrix:
+Run the unit tests, native build, and fixture matrix:
 
 ```
 zig build test
 zig build -Doptimize=ReleaseSafe
-zig build -Dtarget=wasm32-wasi -Doptimize=ReleaseSafe
 ./drml/tests/run-fixtures.sh
 ```
 
@@ -154,7 +156,15 @@ zig fmt --check build.zig drml/src
 
 ## Releases
 
-Publishing a GitHub Release triggers `.github/workflows/release.yml`, which packages Linux x86_64/aarch64, macOS x86_64/aarch64, Windows x86_64, and WASI `wasm32-wasi` archives, as well as platform-specific npm packages.
+Publishing a GitHub Release triggers `.github/workflows/release.yml`. It publishes `@drml/cli` plus native optional-dependency packages for `x86_64-windows`, `aarch64-windows`, `aarch64-macos`, `x86_64-macos`, `x86_64-linux-gnu`, `aarch64-linux-gnu`, `x86_64-linux-musl`, and `aarch64-linux-musl`.
+
+Install the CLI with npm, pnpm, or Yarn:
+
+```
+npm install -g @drml/cli
+```
+
+The package manager selects the matching native `@drml/*` optional dependency. The `drml` launcher verifies that binary and runs it. Reinstall without `--omit=optional` or `--no-optional` if the platform binary was intentionally skipped.
 
 ## Contributing
 

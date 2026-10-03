@@ -37,9 +37,6 @@ jobs:
       - name: Build native
         run: zig build -Doptimize=ReleaseSafe
 
-      - name: Build WASI
-        run: zig build -Dtarget=wasm32-wasi -Doptimize=ReleaseSafe
-
       - name: Fixture matrix
         env:
           DRML_BIN: ${{ github.workspace }}/zig-out/bin/drml

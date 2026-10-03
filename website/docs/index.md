@@ -40,6 +40,6 @@ features:
 - `install` — generate a lockfile or install direct registry packages
 - `check` — find undeclared package imports
 - `init` — create a minimal manifest
-- WASI build target for host-adapted WebAssembly experiments
+- Native npm packages for Windows, macOS, Linux glibc, and Linux musl targets
 
 > drml writes its own lockfile without importing or deleting npm-family lockfiles. Unsupported protocols and incomplete compatibility areas are surfaced as explicit errors.

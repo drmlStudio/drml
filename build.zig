@@ -19,6 +19,8 @@ pub fn build(b: *std.Build) void {
     b.installFile("README.md", "README.md");
     b.installFile("drml/LICENSE", "LICENSE");
     b.installFile("drml/index.js", "index.js");
+    b.installFile("drml/native.js", "native.js");
+    b.installFile("drml/install.js", "install.js");
 
     const package_step = b.step("package", "Build a distributable npm package in zig-out");
     package_step.dependOn(b.getInstallStep());
