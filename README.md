@@ -3,7 +3,7 @@
 # drml
 
 [![CI](https://img.shields.io/github/actions/workflow/status/drmlStudio/drml/ci.yml?branch=main&label=CI)](https://github.com/drmlStudio/drml/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/github/v/release/drmlStudio/drml?display_name=tag)](https://github.com/drmlStudio/drml/releases)
+[![npm version](https://img.shields.io/npm/v/@drml/cli)](https://www.npmjs.com/package/@drml/cli)
 [![License](https://img.shields.io/github/license/drmlStudio/drml)](LICENSE)
 [![Built with Zig](https://img.shields.io/badge/built%20with-Zig-F7A41D?logo=zig&logoColor=white)](https://ziglang.org/)
 [![Docs](https://img.shields.io/badge/docs-VitePress-646CFF?logo=vitepress&logoColor=white)](https://github.com/drmlStudio/drml/tree/main/website)

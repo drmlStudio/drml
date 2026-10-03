@@ -1,6 +1,6 @@
 {
-  "name": "drml",
-  "version": "0.1.0",
+  "name": "@drml/cli",
+  "version": "0.1.0-beta",
   "description": "An explicit package manager for JavaScript and TypeScript projects",
   "license": "MIT",
   "repository": {
@@ -19,6 +19,10 @@
   ],
   "bin": {
     "drml": "bin/drml.wasm"
+  },
+  "scripts": {
+    "build": "zig build -Dtarget=wasm32-wasi -Doptimize=ReleaseSafe",
+    "fmt": "zig fmt drml/src"
   },
   "files": [
     "bin",

@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 env:
   ZIG_VERSION: 0.15.2
@@ -39,7 +40,7 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
-      - name: Package & Publish npm Packages
+      - name: Publish to npm
         shell: bash
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -48,34 +49,14 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
-          mkdir -p dist
 
-          # Determine npm tag based on whether it's a GitHub prerelease or contains a hyphen (e.g., -beta)
           npm_tag="latest"
           if [[ "$IS_PRERELEASE" == "true" ]] || [[ "$version" == *-* ]]; then
             npm_tag="beta"
           fi
-          echo "Publishing to npm with tag: $npm_tag"
 
-          # Copy repo documentation/licenses directly into zig-out
-          cp README.md LICENSE zig-out/
-
-          for pkg in "drml" "@drml/cli"; do
-            # Overwrite package.json inside zig-out for the current target name
-            cat > zig-out/package.json <<EOF
-          {
-            "name": "${pkg}",
-            "version": "${version}",
-            "description": "drml WebAssembly CLI",
-            "license": "MIT",
-            "repository": "https://github.com/drmlStudio/drml"
-          }
-          EOF
-
-            # Pack and publish whatever is inside zig-out using the dynamic npm tag
-            npm pack ./zig-out --pack-destination dist
-            npm publish ./zig-out --access public --tag "$npm_tag"
-          done
+          cd zig-out
+          npm publish --provenance --access public --tag "$npm_tag"
 
       - name: Upload GitHub Release Assets
         uses: softprops/action-gh-release@v2
@@ -83,4 +64,3 @@ jobs:
           tag_name: ${{ github.event.release.tag_name }}
           files: |
             zig-out/bin/drml.wasm
-            dist/*.tgz
