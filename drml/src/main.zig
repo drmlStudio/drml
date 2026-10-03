@@ -15,6 +15,7 @@ fn printUsage() void {
         "  drml install --include-optional-peers  Install optional peer dependencies\n" ++
         "  drml install --omit-dev  Skip root/workspace devDependencies\n" ++
         "  drml install --run-scripts  Run dependency lifecycle scripts (default: ignore)\n" ++
+        "  drml install --ignore-scripts  Explicitly skip dependency lifecycle scripts\n" ++
         "  drml check             Find imports missing from package.json\n" ++
         "  --verbose             Show resolver progress\n" ++
         "  --json                Emit machine-readable output\n" ++
@@ -132,7 +133,7 @@ pub fn main() !void {
     var options = package_manager.InstallOptions{};
     var index: usize = 2;
     while (index < args.len) : (index += 1) {
-        if (std.mem.eql(u8, args[index], "--lockfile-only")) options.lockfile_only = true else if (std.mem.eql(u8, args[index], "--run-scripts")) options.run_scripts = true else if (std.mem.eql(u8, args[index], "--include-dev")) options.include_dev = true else if (std.mem.eql(u8, args[index], "--omit-dev")) options.include_dev = false else if (std.mem.eql(u8, args[index], "--include-optional-peers")) options.include_optional_peers = true else if (std.mem.eql(u8, args[index], "--verbose")) options.verbose = true else if (std.mem.eql(u8, args[index], "--json")) options.json = true else return error.InvalidArguments;
+        if (std.mem.eql(u8, args[index], "--lockfile-only")) options.lockfile_only = true else if (std.mem.eql(u8, args[index], "--run-scripts")) options.run_scripts = true else if (std.mem.eql(u8, args[index], "--ignore-scripts")) options.run_scripts = false else if (std.mem.eql(u8, args[index], "--include-dev")) options.include_dev = true else if (std.mem.eql(u8, args[index], "--omit-dev")) options.include_dev = false else if (std.mem.eql(u8, args[index], "--include-optional-peers")) options.include_optional_peers = true else if (std.mem.eql(u8, args[index], "--verbose")) options.verbose = true else if (std.mem.eql(u8, args[index], "--json")) options.json = true else return error.InvalidArguments;
     }
     const count = try manager.installWithOptions(options);
     package_manager.finishProgress();

@@ -898,7 +898,11 @@ fn runPackageLifecycle(allocator: Allocator, package: *const LockedPackage) !voi
     for (lifecycle) |name| {
         const command = (try packageJsonScript(allocator, manifest_path, name)) orelse continue;
         defer allocator.free(command);
-        std.debug.print("drml: running {s} for {s}\n", .{ name, package.name });
+        if (std.fs.File.stderr().isTty()) {
+            std.debug.print("\n\x1b[36m[2] lifecycle\x1b[0m\n  |- {s}@{s}\n      |- script \"{s}\" ...\n", .{ package.name, package.version, name });
+        } else {
+            std.debug.print("[2] lifecycle\n  |- {s}@{s}\n      |- script \"{s}\" ...\n", .{ package.name, package.version, name });
+        }
         try runCommand(allocator, command, package_path);
     }
 }

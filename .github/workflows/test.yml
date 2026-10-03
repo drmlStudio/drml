@@ -1,0 +1,66 @@
+name: Cross-platform tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  ZIG_VERSION: 0.15.2
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            extension: ''
+          - os: macos-latest
+            extension: ''
+          - os: windows-latest
+            extension: '.exe'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Install JavaScript test dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Check Zig formatting
+        run: zig fmt --check build.zig drml/src
+
+      - name: Run Zig unit tests
+        run: zig build test
+
+      - name: Build release executable
+        run: zig build -Doptimize=ReleaseSafe
+
+      - name: Run Vitest integration tests
+        env:
+          DRML_BIN: ${{ github.workspace }}/zig-out/bin/drml${{ matrix.extension }}
+        run: npm run test:integration
+
+      - name: Run shell fixture matrix
+        shell: bash
+        env:
+          DRML_BIN: ${{ github.workspace }}/zig-out/bin/drml${{ matrix.extension }}
+        run: bash ./drml/tests/run-fixtures.sh

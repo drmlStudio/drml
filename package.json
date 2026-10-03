@@ -29,7 +29,9 @@
   "scripts": {
     "build": "zig build -Doptimize=ReleaseSafe",
     "fmt": "zig fmt .",
-    "build:test": "zig build test"
+    "build:test": "zig build test",
+    "test": "vitest run",
+    "test:integration": "vitest run tests/integration.test.ts"
   },
   "files": [
     "index.js",
@@ -41,5 +43,8 @@
   ],
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.7"
   }
 }
