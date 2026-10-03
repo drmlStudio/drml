@@ -1,6 +1,6 @@
 {
   "name": "@drml/cli",
-  "version": "0.1.1",
+  "version": "0.1.0-prerelease.0",
   "type": "module",
   "description": "An explicit package manager for JavaScript and TypeScript projects",
   "license": "MIT",
@@ -24,8 +24,7 @@
   "scripts": {
     "build": "zig build -Doptimize=ReleaseSafe",
     "fmt": "zig fmt drml/src",
-    "build:test": "zig build test",
-    "postinstall": "node ./install.js"
+    "build:test": "zig build test"
   },
   "files": [
     "index.js",
@@ -35,16 +34,6 @@
     "README.md",
     "LICENSE"
   ],
-  "optionalDependencies": {
-    "@drml/x86_64-windows": "^0.1.0",
-    "@drml/aarch64-windows": "^0.1.0",
-    "@drml/aarch64-macos": "^0.1.0",
-    "@drml/x86_64-macos": "^0.1.0",
-    "@drml/x86_64-linux-gnu": "^0.1.0",
-    "@drml/aarch64-linux-gnu": "^0.1.0",
-    "@drml/x86_64-linux-musl": "^0.1.0",
-    "@drml/aarch64-linux-musl": "^0.1.0"
-  },
   "engines": {
     "node": ">=20"
   }
