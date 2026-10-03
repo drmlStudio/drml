@@ -18,6 +18,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(exe);
     b.installFile("README.md", "README.md");
     b.installFile("LICENSE", "LICENSE");
+    b.installFile("index.js", "index.js");
 
     const package_step = b.step("package", "Build a distributable npm package in zig-out");
     package_step.dependOn(b.getInstallStep());
