@@ -9,6 +9,12 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
+    if (target.result.os.tag == .macos) {
+        // Zig's macOS libc shims (dispatch, sysctl, realpath, and friends)
+        // are provided by libSystem. Link it explicitly so both the native
+        // executable and `zig build test` work with Xcode SDK toolchains.
+        module.linkSystemLibrary("System", .{});
+    }
 
     const exe = b.addExecutable(.{
         .name = "drml",

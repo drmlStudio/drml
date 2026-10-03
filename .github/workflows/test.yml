@@ -46,7 +46,7 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Run Zig unit tests
-        run: zig build test
+        run: npm run test:zig
 
       - name: Build release executable
         run: zig build -Doptimize=ReleaseSafe
@@ -55,6 +55,9 @@ jobs:
         env:
           DRML_BIN: ${{ github.workspace }}/zig-out/bin/drml${{ matrix.extension }}
         run: npm run test:integration
+
+      - name: Run JavaScript unit tests
+        run: npm run test:unit
 
       - name: Run shell fixture matrix
         shell: bash

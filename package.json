@@ -30,8 +30,10 @@
     "build": "zig build -Doptimize=ReleaseSafe",
     "fmt": "zig fmt .",
     "build:test": "zig build test",
-    "test": "vitest run",
-    "test:integration": "vitest run tests/integration.test.ts"
+    "test:zig": "zig build test",
+    "test:unit": "vitest run --config vitest.config.ts",
+    "test": "npm run test:unit",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "files": [
     "index.js",

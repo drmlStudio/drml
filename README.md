@@ -131,13 +131,21 @@ These are implementation notes for the current release, not restrictions on the 
 
 ## Development
 
-Run the unit tests, native build, and fixture matrix:
+Run the Zig unit tests, native build, shell fixture matrix, and JavaScript tests:
 
 ```
-zig build test
+npm run test:zig
+npm run test:unit
 zig build -Doptimize=ReleaseSafe
 ./drml/tests/run-fixtures.sh
+npm run test:integration
 ```
+
+`npm run test:zig` runs only Zig unit tests. `npm run test:unit` runs fast
+JavaScript unit tests. `npm run test:integration` uses a separate Vitest
+configuration and copies projects from `tests/fixtures/` into temporary
+directories before invoking the built `drml` executable, so it exercises real
+commands such as `drml install`, `drml add`, `drml init`, and `drml run`.
 
 The fixture corpus covers ordinary manifests, semver ranges, duplicate dependency declarations, foreign lockfiles, workspaces, transitive dependencies, script hooks, source checking, and regression cases. Registry-backed fixtures are opt-in:
 

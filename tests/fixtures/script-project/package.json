@@ -1,0 +1,9 @@
+{
+  "name": "script-project-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "touch build-marker",
+    "test": "printf test-ok > test-marker"
+  }
+}
