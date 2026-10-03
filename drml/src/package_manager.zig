@@ -276,7 +276,7 @@ fn appendPeerPackages(allocator: Allocator, list: *std.ArrayList(LockedPackage),
 }
 
 fn writeLockfile(allocator: Allocator, manifest: *Manifest, packages: []LockedPackage) !void {
-    var file = try std.fs.cwd().createFile("drml-lock.json", .{ .truncate = true });
+    var file = try std.fs.cwd().createFile("drml-lock.json.tmp", .{ .truncate = true });
     defer file.close();
     var buffer: [4096]u8 = undefined;
     var writer = file.writer(&buffer);
@@ -314,6 +314,7 @@ fn writeLockfile(allocator: Allocator, manifest: *Manifest, packages: []LockedPa
     }
     try writer.interface.writeAll("\n  }\n}\n");
     try writer.interface.flush();
+    try std.fs.cwd().rename("drml-lock.json.tmp", "drml-lock.json");
     _ = allocator;
 }
 
@@ -331,6 +332,7 @@ fn fetchRegistryMetadataNative(allocator: Allocator, name: []const u8) ![]u8 {
     defer body.deinit();
     const result = try client.fetch(.{
         .location = .{ .url = url },
+        .headers = .{ .accept_encoding = .{ .override = "identity" } },
         .response_writer = &body.writer,
     });
     if (result.status != .ok) return error.PackageNotFound;
@@ -338,6 +340,20 @@ fn fetchRegistryMetadataNative(allocator: Allocator, name: []const u8) ![]u8 {
 }
 
 const Version = struct { major: u64, minor: u64, patch: u64 };
+const PartialVersion = struct { version: Version, components: u8 };
+
+fn parsePartialVersion(value: []const u8) ?PartialVersion {
+    var parts = std.mem.splitScalar(u8, std.mem.trim(u8, value, " \t"), '.');
+    var numbers: [3]u64 = .{ 0, 0, 0 };
+    var count: u8 = 0;
+    while (parts.next()) |part| {
+        if (count == 3 or part.len == 0 or (part.len > 1 and part[0] == '0')) return null;
+        numbers[count] = std.fmt.parseInt(u64, part, 10) catch return null;
+        count += 1;
+    }
+    if (count == 0) return null;
+    return .{ .version = .{ .major = numbers[0], .minor = numbers[1], .patch = numbers[2] }, .components = count };
+}
 
 fn parseVersion(value: []const u8) ?Version {
     var parts = std.mem.splitScalar(u8, value, '.');
@@ -360,30 +376,35 @@ fn satisfiesComparator(version: Version, comparator: []const u8) bool {
     const spec = std.mem.trim(u8, comparator, " \t");
     if (spec.len == 0 or std.mem.eql(u8, spec, "*") or std.mem.eql(u8, spec, "x") or std.mem.eql(u8, spec, "X")) return true;
     if (std.mem.startsWith(u8, spec, "^")) {
-        const base = parseVersion(std.mem.trim(u8, spec[1..], " \t")) orelse return false;
+        const partial = parsePartialVersion(spec[1..]) orelse return false;
+        const base = partial.version;
         if (compareVersion(version, base) == .lt) return false;
+        if (partial.components == 1) return version.major == base.major;
         if (base.major > 0) return version.major == base.major;
         if (base.minor > 0) return version.major == 0 and version.minor == base.minor;
+        if (partial.components == 2) return version.major == 0 and version.minor == 0;
         return version.major == 0 and version.minor == 0 and version.patch == base.patch;
     }
     if (std.mem.startsWith(u8, spec, "~")) {
-        const base = parseVersion(std.mem.trim(u8, spec[1..], " \t")) orelse return false;
-        return compareVersion(version, base) != .lt and version.major == base.major and version.minor == base.minor;
+        const partial = parsePartialVersion(spec[1..]) orelse return false;
+        const base = partial.version;
+        if (compareVersion(version, base) == .lt or version.major != base.major) return false;
+        return partial.components == 1 or version.minor == base.minor;
     }
     if (std.mem.startsWith(u8, spec, ">=")) {
-        const base = parseVersion(spec[2..]) orelse return false;
+        const base = (parsePartialVersion(spec[2..]) orelse return false).version;
         return compareVersion(version, base) != .lt;
     }
     if (std.mem.startsWith(u8, spec, ">")) {
-        const base = parseVersion(spec[1..]) orelse return false;
+        const base = (parsePartialVersion(spec[1..]) orelse return false).version;
         return compareVersion(version, base) == .gt;
     }
     if (std.mem.startsWith(u8, spec, "<=")) {
-        const base = parseVersion(spec[2..]) orelse return false;
+        const base = (parsePartialVersion(spec[2..]) orelse return false).version;
         return compareVersion(version, base) != .gt;
     }
     if (std.mem.startsWith(u8, spec, "<")) {
-        const base = parseVersion(spec[1..]) orelse return false;
+        const base = (parsePartialVersion(spec[1..]) orelse return false).version;
         return compareVersion(version, base) == .lt;
     }
     if (std.mem.indexOf(u8, spec, "||")) |separator| {
@@ -399,7 +420,12 @@ fn satisfiesComparator(version: Version, comparator: []const u8) bool {
         }
         return version.major == major;
     }
-    return if (parseVersion(spec)) |exact| compareVersion(version, exact) == .eq else false;
+    if (parseVersion(spec)) |exact| return compareVersion(version, exact) == .eq;
+    if (parsePartialVersion(spec)) |partial| {
+        if (partial.components == 1) return version.major == partial.version.major;
+        if (partial.components == 2) return version.major == partial.version.major and version.minor == partial.version.minor;
+    }
+    return false;
 }
 
 fn satisfiesRange(version: Version, requested: []const u8) bool {
@@ -479,22 +505,55 @@ fn downloadPackageNative(allocator: Allocator, package: *const LockedPackage) ![
     try std.fs.cwd().makePath(".drml-cache");
     const cache_key = std.hash.Wyhash.hash(0, package.name);
     const archive = try std.fmt.allocPrint(allocator, ".drml-cache/{x}-{s}.tgz", .{ cache_key, package.version });
-    const file = try std.fs.cwd().createFile(archive, .{});
+    const temporary = try std.fmt.allocPrint(allocator, "{s}.tmp", .{archive});
+    defer allocator.free(temporary);
+    const file = try std.fs.cwd().createFile(temporary, .{ .truncate = true });
     var buffer: [64 * 1024]u8 = undefined;
     var writer = file.writer(&buffer);
     var client = std.http.Client{ .allocator = allocator };
     defer client.deinit();
     const result = client.fetch(.{
         .location = .{ .url = package.source },
+        .headers = .{ .accept_encoding = .{ .override = "identity" } },
         .response_writer = &writer.interface,
     }) catch |err| {
         file.close();
+        std.fs.cwd().deleteFile(temporary) catch {};
         return err;
     };
-    try writer.interface.flush();
+    writer.interface.flush() catch |err| {
+        file.close();
+        std.fs.cwd().deleteFile(temporary) catch {};
+        return err;
+    };
     file.close();
-    if (result.status != .ok) return error.PackageDownloadFailed;
+    if (result.status != .ok) {
+        std.fs.cwd().deleteFile(temporary) catch {};
+        return error.PackageDownloadFailed;
+    }
+    verifyPackageIntegrity(allocator, temporary, package.integrity) catch |err| {
+        std.fs.cwd().deleteFile(temporary) catch {};
+        return err;
+    };
+    std.fs.cwd().rename(temporary, archive) catch |err| {
+        std.fs.cwd().deleteFile(temporary) catch {};
+        return err;
+    };
     return archive;
+}
+
+fn verifyPackageIntegrity(allocator: Allocator, path: []const u8, integrity: ?[]const u8) !void {
+    const expected = integrity orelse return;
+    if (!std.mem.startsWith(u8, expected, "sha512-")) return error.UnsupportedIntegrity;
+    const file = try std.fs.cwd().openFile(path, .{});
+    defer file.close();
+    const contents = try file.readToEndAlloc(allocator, 256 * 1024 * 1024);
+    defer allocator.free(contents);
+    var digest: [64]u8 = undefined;
+    std.crypto.hash.sha2.Sha512.hash(contents, &digest, .{});
+    var encoded: [88]u8 = undefined;
+    const actual = std.base64.standard.Encoder.encode(&encoded, &digest);
+    if (!std.mem.eql(u8, expected[7..], actual)) return error.PackageIntegrityMismatch;
 }
 
 fn extractPackage(allocator: Allocator, package: *const LockedPackage, archive: []const u8) !void {
@@ -720,4 +779,9 @@ test "common semver ranges are accepted" {
     try std.testing.expect(satisfiesRange(.{ .major = 1, .minor = 3, .patch = 7 }, ">=1.0.0 <2.0.0"));
     try std.testing.expect(satisfiesRange(.{ .major = 2, .minor = 0, .patch = 0 }, "^1.0.0 || ^2.0.0"));
     try std.testing.expect(!satisfiesRange(.{ .major = 23, .minor = 0, .patch = 0 }, "^22.15.3"));
+    try std.testing.expect(satisfiesRange(.{ .major = 1, .minor = 4, .patch = 9 }, "^1.2"));
+    try std.testing.expect(satisfiesRange(.{ .major = 1, .minor = 2, .patch = 9 }, "~1.2"));
+    try std.testing.expect(!satisfiesRange(.{ .major = 1, .minor = 3, .patch = 0 }, "~1.2"));
+    try std.testing.expect(satisfiesRange(.{ .major = 3, .minor = 9, .patch = 0 }, "3"));
+    try std.testing.expect(satisfiesRange(.{ .major = 0, .minor = 0, .patch = 9 }, "^0.0"));
 }

@@ -15,7 +15,8 @@ fn printUsage() void {
         "  drml install --omit-dev  Skip root/workspace devDependencies\n" ++
         "  drml install --run-scripts  Run dependency lifecycle scripts (default: ignore)\n" ++
         "  drml check             Find imports missing from package.json\n" ++
-        "  drml --help            Show this help\n\n" ++
+        "  drml --help            Show this help\n" ++
+        "  drml --version         Show the CLI version\n\n" ++
         "Exact versions and common semver ranges are supported. Existing npm-family\n" ++
         "lockfiles are ignored; lifecycle scripts run only with --run-scripts.\n", .{});
 }
@@ -24,6 +25,11 @@ pub fn main() !void {
     const allocator = std.heap.page_allocator;
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
+
+    if (args.len == 2 and std.mem.eql(u8, args[1], "--version")) {
+        std.fs.File.stdout().deprecatedWriter().print("0.1.0-beta.2\n", .{}) catch return error.WriteFailed;
+        return;
+    }
 
     if (args.len < 2 or std.mem.eql(u8, args[1], "--help") or std.mem.eql(u8, args[1], "-h")) {
         if (args.len > 2) return error.InvalidArguments;

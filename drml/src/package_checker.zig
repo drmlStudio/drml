@@ -126,17 +126,21 @@ fn packageName(specifier: []const u8) ?[]const u8 {
         std.mem.eql(u8, specifier, "diagnostics_channel") or std.mem.eql(u8, specifier, "dns") or
         std.mem.eql(u8, specifier, "events") or std.mem.eql(u8, specifier, "fs") or
         std.mem.eql(u8, specifier, "fs/promises") or std.mem.eql(u8, specifier, "http") or
-        std.mem.eql(u8, specifier, "https") or std.mem.eql(u8, specifier, "module") or
+        std.mem.eql(u8, specifier, "https") or std.mem.eql(u8, specifier, "http2") or
+        std.mem.eql(u8, specifier, "inspector") or std.mem.eql(u8, specifier, "module") or
         std.mem.eql(u8, specifier, "net") or std.mem.eql(u8, specifier, "os") or
         std.mem.eql(u8, specifier, "path") or std.mem.eql(u8, specifier, "perf_hooks") or
         std.mem.eql(u8, specifier, "process") or std.mem.eql(u8, specifier, "punycode") or
         std.mem.eql(u8, specifier, "querystring") or std.mem.eql(u8, specifier, "readline") or
         std.mem.eql(u8, specifier, "repl") or std.mem.eql(u8, specifier, "stream") or
         std.mem.eql(u8, specifier, "string_decoder") or std.mem.eql(u8, specifier, "timers") or
-        std.mem.eql(u8, specifier, "tls") or std.mem.eql(u8, specifier, "tty") or
+        std.mem.eql(u8, specifier, "test") or std.mem.eql(u8, specifier, "test/reporters") or
+        std.mem.eql(u8, specifier, "timers/promises") or std.mem.eql(u8, specifier, "tls") or
+        std.mem.eql(u8, specifier, "trace_events") or std.mem.eql(u8, specifier, "tty") or
         std.mem.eql(u8, specifier, "url") or std.mem.eql(u8, specifier, "util") or
         std.mem.eql(u8, specifier, "v8") or std.mem.eql(u8, specifier, "vm") or
         std.mem.eql(u8, specifier, "wasi") or std.mem.eql(u8, specifier, "worker_threads") or
+        std.mem.eql(u8, specifier, "sqlite") or
         std.mem.eql(u8, specifier, "zlib")) return null;
 
     if (specifier[0] == '@') {
@@ -372,4 +376,7 @@ test "normalizes package names and ignores local and builtin imports" {
     try std.testing.expect(packageName("./local") == null);
     try std.testing.expect(packageName("node:fs") == null);
     try std.testing.expect(packageName("fs/promises") == null);
+    try std.testing.expect(packageName("test") == null);
+    try std.testing.expect(packageName("test/reporters") == null);
+    try std.testing.expect(packageName("inspector") == null);
 }

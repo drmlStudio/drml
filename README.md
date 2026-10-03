@@ -1,4 +1,4 @@
-![Logo](./assets/logo-drml-black.svg)
+![Logo](https://private-us-east-1.manuscdn.com/sessionFile/jgg7caFXEjyv0DgxhYNwpO/sandbox/kYjabx4USuepQStE16MPza-images_1791019684898_na1fn_L2hvbWUvdWJ1bnR1L2RybWwtYXVkaXQvcmVwby9hc3NldHMvbG9nby1kcm1sLWJsYWNr.svg?Expires=1791192486&Signature=MEYCIQD459IavKHTKKrdDzZprNzXvlvhXHqi6ipZFkuFkD3QXQIhAKYstnXzktTxxrK3JyQnVGAqiLJfjNrtUAOu-vpc-X1v&Key-Pair-Id=K1K5N5YNBUUMMN)
 
 # drml
 
@@ -65,7 +65,7 @@ Commands operate on the current working directory unless `init` receives a direc
 | `--include-optional-peers` | `install` | Include optional peer dependencies. Optional peers are omitted by default. |
 | `--run-scripts` | `install` | Run dependency `preinstall`, `install`, and `postinstall` scripts after extraction. Scripts are ignored by default. |
 
-There is currently no `--version` flag. Use the release tag or package metadata to identify a build.
+`--version` prints the CLI version. Errors return a non-zero exit code, including from the NPM/WASI launcher.
 
 ### Commands
 
@@ -96,7 +96,7 @@ The installer reads these dependency fields:
 
 Repeated package names across these sections are combined into one lockfile entry. The first declaration supplies the requested version; later declarations contribute their `dev`, `optional`, and `peer` markers. This prevents a package listed with, for example, `^22.15.3` in one section and `22.15.3` in another from failing with `ConflictingDependencySpec`.
 
-Common exact versions and semver ranges such as caret (`^22.15.3`), tilde (`~22.15.3`), comparator sets (`>=22.0.0 <23.0.0`), wildcards, and `||` alternatives are supported during registry resolution. Git URLs and `workspace:` dependencies are also recognized where applicable.
+Common exact and partial versions and semver ranges such as caret (`^22.15`), tilde (`~22.15`), comparator sets (`>=22.0 <23.0.0`), wildcards, and `||` alternatives are supported during registry resolution. Git URLs and `workspace:` dependencies are also recognized where applicable.
 
 Existing npm, pnpm, Yarn, Bun, and npm shrinkwrap lockfiles are left in place and do not prevent drml from generating `drml-lock.json`. drml does not import their contents yet; `drml-lock.json` is its own lockfile.
 

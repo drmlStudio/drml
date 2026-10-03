@@ -320,6 +320,19 @@ assert conflict["packages"]["foo"]["requested"] == "1.2.3"
 PY
 echo "AUDIT LOCKFILE ASSERTIONS: PASS"
 
+version_dir="$TMP/version"
+mkdir -p "$version_dir"
+if [[ "$($BIN --version 2>"$version_dir/stderr")" != "0.1.0-beta.2" ]]; then
+  echo "FAIL (version output)"
+  cat "$version_dir/stderr"
+  exit 1
+fi
+if (cd "$version_dir" && "$BIN" definitely-not-a-command >stdout 2>stderr); then
+  echo "FAIL (unknown command unexpectedly succeeded)"
+  exit 1
+fi
+echo "AUDIT EXIT CODES: PASS"
+
 run_audit_check_success regex-clean
 run_audit_check_failure multiline-missing multiline-missing-package
 run_audit_check_failure comment-missing import-comment-missing require-comment-missing
