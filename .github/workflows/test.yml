@@ -37,6 +37,10 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Set macOS SDK Path
+        if: runner.os == 'macOS'
+        run: echo "SDKROOT=$(xcrun --show-sdk-path)" >> $GITHUB_ENV
+
       - name: Set up Zig
         uses: goto-bus-stop/setup-zig@v2
         with:
