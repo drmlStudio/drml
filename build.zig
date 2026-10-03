@@ -7,6 +7,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("drml/src/main.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
 
     const exe = b.addExecutable(.{

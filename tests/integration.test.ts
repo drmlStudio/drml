@@ -30,6 +30,18 @@ function runDrml(cwd: string, args: string[]) {
   return { stdout: result.stdout, stderr: result.stderr };
 }
 
+function runDrmlFailure(cwd: string, args: string[]) {
+  const result = spawnSync(drmlBinary, args, {
+    cwd,
+    encoding: 'utf8',
+    timeout: 120_000,
+    windowsHide: true,
+  });
+  if (result.error) throw result.error;
+  expect(result.status).not.toBe(0);
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+}
+
 function git(cwd: string, args: string[]) {
   execFileSync('git', args, { cwd, stdio: 'ignore' });
 }
@@ -75,15 +87,102 @@ describe('drml executable integration', () => {
   it('routes add arguments around --dev and installs both groups', () => {
     const cwd = project({ name: 'add-test', version: '1.0.0', private: true });
 
-    const result = runDrml(cwd, ['add', 'is-number', '--dev', 'is-odd', '--json']);
+    const result = runDrml(cwd, ['add', 'is-number', '--dev', 'is-odd', '--verbose', '--json']);
     const summary = JSON.parse(result.stdout);
     const manifest = JSON.parse(readFileSync(join(cwd, 'package.json'), 'utf8'));
 
     expect(summary).toMatchObject({ command: 'add', ok: true, dependencies: 1, devDependencies: 1 });
+    expect(summary.verbose).toBe(true);
+    expect(result.stderr).toContain('metadata');
     expect(manifest.dependencies).toEqual({ 'is-number': 'latest' });
     expect(manifest.devDependencies).toEqual({ 'is-odd': 'latest' });
     expect(existsSync(join(cwd, 'node_modules', 'is-number', 'package.json'))).toBe(true);
     expect(existsSync(join(cwd, 'node_modules', 'is-odd', 'package.json'))).toBe(true);
+  }, 120_000);
+
+  it('supports --lockfile-only without creating node_modules', () => {
+    const cwd = project({
+      name: 'lockfile-only-test',
+      version: '1.0.0',
+      private: true,
+      dependencies: { 'is-number': '7.0.0' },
+    });
+
+    const result = runDrml(cwd, ['install', '--lockfile-only', '--json']);
+    expect(JSON.parse(result.stdout)).toMatchObject({ command: 'install', ok: true });
+    expect(existsSync(join(cwd, 'drml-lock.json'))).toBe(true);
+    expect(existsSync(join(cwd, 'node_modules'))).toBe(false);
+  }, 120_000);
+
+  it('implements --omit-dev and --include-dev against the real filesystem', () => {
+    const cwd = project({
+      name: 'dev-mode-test',
+      version: '1.0.0',
+      private: true,
+      devDependencies: { 'is-number': '7.0.0' },
+    });
+
+    runDrml(cwd, ['install', '--omit-dev']);
+    expect(existsSync(join(cwd, 'node_modules', 'is-number'))).toBe(false);
+    expect(JSON.parse(readFileSync(join(cwd, 'drml-lock.json'), 'utf8')).packages).toEqual({});
+
+    rmSync(join(cwd, 'node_modules'), { recursive: true, force: true });
+    rmSync(join(cwd, 'drml-lock.json'), { force: true });
+    runDrml(cwd, ['install', '--include-dev', '--json']);
+    expect(existsSync(join(cwd, 'node_modules', 'is-number', 'package.json'))).toBe(true);
+    expect(JSON.parse(readFileSync(join(cwd, 'drml-lock.json'), 'utf8')).packages['is-number'].dev).toBe(true);
+  }, 120_000);
+
+  it('implements --include-optional-peers in the lockfile and node_modules', () => {
+    const cwd = project({
+      name: 'optional-peer-test',
+      version: '1.0.0',
+      private: true,
+      peerDependencies: { react: '18.3.1' },
+      peerDependenciesMeta: { react: { optional: true } },
+    });
+
+    runDrml(cwd, ['install']);
+    expect(JSON.parse(readFileSync(join(cwd, 'drml-lock.json'), 'utf8')).packages).toEqual({});
+
+    rmSync(join(cwd, 'node_modules'), { recursive: true, force: true });
+    rmSync(join(cwd, 'drml-lock.json'), { force: true });
+    runDrml(cwd, ['install', '--include-optional-peers', '--json']);
+    const lock = JSON.parse(readFileSync(join(cwd, 'drml-lock.json'), 'utf8'));
+    expect(lock.packages.react).toMatchObject({ version: '18.3.1', peer: true, optional: false });
+    expect(existsSync(join(cwd, 'node_modules', 'react', 'package.json'))).toBe(true);
+  }, 120_000);
+
+  it('keeps --json parseable while --verbose reports real resolver stages', () => {
+    const cwd = project({
+      name: 'verbose-test',
+      version: '1.0.0',
+      private: true,
+      dependencies: { 'is-number': '7.0.0' },
+    });
+
+    const result = runDrml(cwd, ['install', '--verbose', '--json']);
+    expect(JSON.parse(result.stdout)).toMatchObject({ command: 'install', ok: true, verbose: true });
+    expect(result.stderr).toContain('metadata');
+    expect(result.stderr).toContain('fetch');
+    expect(result.stderr).toContain('installed');
+    expect(existsSync(join(cwd, 'node_modules', 'is-number', 'package.json'))).toBe(true);
+  }, 120_000);
+
+  it('reports invalid versions and invalid flags with nonzero status', () => {
+    const invalidVersion = project({
+      name: 'invalid-version-test',
+      version: '1.0.0',
+      private: true,
+      dependencies: { 'is-number': '999.999.999' },
+    });
+    const versionFailure = runDrmlFailure(invalidVersion, ['install', '--json']);
+    expect(versionFailure.stderr).toContain('PackageVersionNotFound');
+    expect(existsSync(join(invalidVersion, 'node_modules'))).toBe(false);
+
+    const invalidFlag = project({ name: 'invalid-flag-test', version: '1.0.0', private: true });
+    const flagFailure = runDrmlFailure(invalidFlag, ['install', '--definitely-not-a-flag']);
+    expect(flagFailure.stderr).toContain('InvalidArguments');
   }, 120_000);
 
   it('skips lifecycle scripts by default and with --ignore-scripts', () => {
