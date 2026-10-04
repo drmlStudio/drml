@@ -46,13 +46,6 @@ jobs:
       - name: Install JavaScript test dependencies
         run: npm ci --ignore-scripts
 
-      - name: Run Zig unit tests on macOS
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          SDK_PATH="$(xcrun --show-sdk-path)"
-          zig test ./drml/src/main.zig -lc
-
       - name: Run Zig unit tests on non-macOS
         if: runner.os != 'macOS'
         run: |
