@@ -1,6 +1,6 @@
 {
   "name": "@drml/cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "An explicit package manager for JavaScript and TypeScript projects",
   "license": "MIT",
