@@ -23,8 +23,6 @@ jobs:
         include:
           - os: ubuntu-latest
             extension: ''
-          - os: macos-latest
-            extension: ''
           - os: windows-latest
             extension: '.exe'
 
@@ -46,8 +44,7 @@ jobs:
       - name: Install JavaScript test dependencies
         run: npm ci --ignore-scripts
 
-      - name: Run Zig unit tests on non-macOS
-        if: runner.os != 'macOS'
+      - name: Run Zig unit tests
         run: |
           npm run test:zig
 
