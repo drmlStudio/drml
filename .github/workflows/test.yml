@@ -51,7 +51,7 @@ jobs:
         shell: bash
         run: |
           SDK_PATH="$(xcrun --show-sdk-path)"
-          zig test ./drml/src/main.zig -L "$SDK_PATH/usr/lib" -lSystem
+          zig test ./drml/src/main.zig -lc
 
       - name: Run Zig unit tests on non-macOS
         if: runner.os != 'macOS'
